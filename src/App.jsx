@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { supabase } from './lib/supabase.js';
 
 // ─── INITIAL DATA ────────────────────────────────────────────────────────────
 const INITIAL_PRODUCTS = [
@@ -1965,7 +1966,6 @@ function Faturas({ clients, orders, products, payments, invoices, onSave, onDele
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN APP — com Supabase
 // ════════════════════════════════════════════════════════════════════════════
-import { supabase } from './lib/supabase.js'
 
 export default function App() {
   const [view, setView]                 = useState("dashboard");
