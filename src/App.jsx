@@ -1291,13 +1291,303 @@ function Products({ products, onSave, onDelete, priceHistory, onPriceChange }) {
   );
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// EXCEL IMPORT MODAL
+// ════════════════════════════════════════════════════════════════════════════
+function ExcelImportModal({ clients, products, onImport, onClose }) {
+  const [step, setStep]           = useState("upload");
+  const [rawRows, setRawRows]     = useState([]);
+  const [headers, setHeaders]     = useState([]);
+  const [mapping, setMapping]     = useState({});
+  const [preview, setPreview]     = useState([]);
+  const [errors, setErrors]       = useState([]);
+  const [aiMsg, setAiMsg]         = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone]           = useState(0);
+
+  const FIELDS = [
+    { key:"data",      label:"Data",          required:true  },
+    { key:"reqNum",    label:"Nº Requisição",  required:false },
+    { key:"cliente",   label:"Cliente",        required:true  },
+    { key:"produto",   label:"Produto",        required:true  },
+    { key:"qtd",       label:"Quantidade",     required:true  },
+    { key:"valorUnit", label:"Preço Unitário", required:false },
+    { key:"total",     label:"Total",          required:false },
+  ];
+
+  const autoDetect = (hdrs) => {
+    const n = h => (h||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    const map = {};
+    hdrs.forEach(h => {
+      const l = n(h);
+      if (!map.data      && (l.includes("data") || l.includes("date")))                                              map.data      = h;
+      if (!map.reqNum    && (l.includes("req")  || l.includes("num")  || l==="n"))                                  map.reqNum    = h;
+      if (!map.cliente   && (l.includes("cliente") || l.includes("client")))                                        map.cliente   = h;
+      if (!map.produto   && (l.includes("produto") || l.includes("product") || l.includes("combustivel")))          map.produto   = h;
+      if (!map.qtd       && (l.includes("qtd") || l.includes("quant") || l.includes("litro") || l==="l"))          map.qtd       = h;
+      if (!map.valorUnit && (l.includes("unit") || l.includes("preco unit") || l.includes("valor unit")))           map.valorUnit = h;
+      if (!map.total     && (l.includes("total") || l.includes("amount")))                                          map.total     = h;
+    });
+    return map;
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+      const buf  = await file.arrayBuffer();
+      const wb   = XLSX.read(buf);
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:"" });
+      if (rows.length < 2) { alert("Ficheiro vazio ou sem dados."); return; }
+      const hdrs = rows[0].map(String);
+      const data = rows.slice(1).filter(r => r.some(c => c !== ""));
+      setHeaders(hdrs);
+      setRawRows(data);
+      setMapping(autoDetect(hdrs));
+      setStep("mapping");
+    } catch(err) {
+      alert("Erro ao ler o ficheiro. Certifica-te que é um ficheiro Excel válido.");
+    }
+  };
+
+  const askAI = async () => {
+    setAiLoading(true); setAiMsg("");
+    try {
+      const sample = rawRows.slice(0,3).map(r => {
+        const obj = {}; headers.forEach((h,i) => obj[h] = r[i]); return obj;
+      });
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:600,
+          messages:[{role:"user",content:`Tens um Excel com colunas: ${JSON.stringify(headers)}\nExemplo de dados: ${JSON.stringify(sample)}\nMapeamento actual: ${JSON.stringify(mapping)}\n\nOs campos necessários são: data, reqNum (nº requisição), cliente, produto, qtd (quantidade), valorUnit (preço unitário), total.\n\nAnalisa e diz em português:\n1. Se o mapeamento está correcto\n2. O que fazer com colunas não mapeadas\n3. Problemas nos dados\nSê conciso e prático.`}]
+        })
+      });
+      const d = await res.json();
+      setAiMsg(d.content?.[0]?.text || "Sem resposta.");
+    } catch(e) { setAiMsg("Erro ao contactar a IA. Verifica o mapeamento manualmente."); }
+    setAiLoading(false);
+  };
+
+  const parseDate = (val) => {
+    if (!val) return null;
+    if (typeof val === "number") {
+      const d = new Date((val - 25569) * 86400 * 1000);
+      return d.toISOString().split("T")[0];
+    }
+    const s = String(val).trim();
+    const pt = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (pt) { const y = pt[3].length===2?"20"+pt[3]:pt[3]; return `${y}-${pt[2].padStart(2,"0")}-${pt[1].padStart(2,"0")}`; }
+    return s;
+  };
+
+  const buildPreview = () => {
+    const errs = [];
+    const rows = rawRows.map((row, i) => {
+      const get = (field) => { const col=mapping[field]; if(!col) return ""; const idx=headers.indexOf(col); return idx>=0?row[idx]:""; };
+      const dataStr    = parseDate(get("data"));
+      const clienteStr = String(get("cliente")||"").trim();
+      const produtoStr = String(get("produto")||"").trim();
+      const qtdVal     = parseFloat(String(get("qtd")).replace(",","."))||0;
+      const vuVal      = parseFloat(String(get("valorUnit")).replace(",","."))||0;
+      const totalVal   = parseFloat(String(get("total")).replace(",","."))||0;
+      const reqNum     = String(get("reqNum")||"").trim();
+      const cliente    = clients.find(c => c.nome.toLowerCase().includes(clienteStr.toLowerCase()) || clienteStr.toLowerCase().includes(c.nome.split(",")[0].toLowerCase()));
+      const produto    = products.find(p => p.nome.toLowerCase().includes(produtoStr.toLowerCase()) || produtoStr.toLowerCase().includes(p.nome.toLowerCase()));
+      const rowErrs    = [];
+      if (!dataStr)    rowErrs.push("data inválida");
+      if (!cliente)    rowErrs.push(`cliente "${clienteStr}" não encontrado`);
+      if (!produto)    rowErrs.push(`produto "${produtoStr}" não encontrado`);
+      if (qtdVal <= 0) rowErrs.push("quantidade inválida");
+      if (rowErrs.length) errs.push(`Linha ${i+2}: ${rowErrs.join(", ")}`);
+      const calcTotal  = qtdVal*vuVal||totalVal;
+      return { _row:i, _ok:rowErrs.length===0, _errs:rowErrs, data:dataStr, reqNum, clienteStr, produtoStr, clienteId:cliente?.id, produtoId:produto?.id, qtd:qtdVal, valorUnit:vuVal||(calcTotal/qtdVal)||0, total:calcTotal };
+    });
+    setPreview(rows); setErrors(errs); setStep("preview");
+  };
+
+  const doImport = async () => {
+    setImporting(true);
+    const valid = preview.filter(r => r._ok);
+    for (let i = 0; i < valid.length; i++) {
+      const r = valid[i];
+      await onImport({ id:genId(), data:r.data, reqNum:r.reqNum, clienteId:r.clienteId, produtoId:r.produtoId, qtd:r.qtd, valorUnit:r.valorUnit, total:r.total });
+      setDone(i+1);
+    }
+    setImporting(false); setStep("done");
+  };
+
+  const okCount = preview.filter(r=>r._ok).length;
+  const badCount = preview.filter(r=>!r._ok).length;
+
+  return (
+    <Modal title="Importar Pedidos do Excel" onClose={onClose} wide>
+      <div style={{position:"relative"}}>
+
+        {/* UPLOAD */}
+        {step==="upload" && (
+          <div style={{textAlign:"center",padding:"2.5rem 1rem"}}>
+            <div style={{fontSize:"3.5rem",marginBottom:"1rem"}}>📊</div>
+            <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"1.05rem",marginBottom:"0.4rem"}}>Importar ficheiro Excel</div>
+            <div style={{color:"#475569",fontSize:"0.82rem",marginBottom:"2rem"}}>Formatos suportados: .xlsx, .xls, .csv</div>
+            <label style={{display:"inline-block",padding:"0.75rem 1.8rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",borderRadius:"12px",cursor:"pointer",fontWeight:700,fontSize:"0.88rem",boxShadow:"0 4px 16px rgba(245,158,11,0.3)"}}>
+              📂 Escolher ficheiro
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{display:"none"}}/>
+            </label>
+            <div style={{marginTop:"2rem",padding:"1rem 1.2rem",background:C.bgDeep,borderRadius:"12px",border:C.border,textAlign:"left"}}>
+              <div style={{color:"#475569",fontSize:"0.72rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"0.6rem"}}>O ficheiro deve ter colunas como:</div>
+              <div style={{color:"#64748b",fontSize:"0.8rem",lineHeight:2}}>
+                📅 Data &nbsp;·&nbsp; 🔢 Nº Requisição &nbsp;·&nbsp; 👤 Cliente &nbsp;·&nbsp; ⛽ Produto &nbsp;·&nbsp; 📦 Quantidade &nbsp;·&nbsp; 💰 Preço Unitário &nbsp;·&nbsp; 💵 Total
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MAPPING */}
+        {step==="mapping" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.8rem 1rem",background:"rgba(245,158,11,0.07)",border:"1px solid rgba(245,158,11,0.18)",borderRadius:"10px",marginBottom:"1.2rem"}}>
+              <div style={{color:"#fbbf24",fontSize:"0.82rem"}}>✓ <strong>{rawRows.length} linhas</strong> · <strong>{headers.length} colunas</strong> detectadas</div>
+              <button onClick={askAI} disabled={aiLoading} style={{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",color:"#fff",border:"none",borderRadius:"8px",padding:"0.42rem 1rem",cursor:aiLoading?"wait":"pointer",fontSize:"0.78rem",fontWeight:600,display:"flex",alignItems:"center",gap:"6px",opacity:aiLoading?0.7:1}}>
+                {aiLoading?"⏳ A analisar...":"✨ Analisar com IA"}
+              </button>
+            </div>
+
+            {aiMsg && (
+              <div style={{marginBottom:"1.2rem",padding:"1rem 1.2rem",background:"rgba(139,92,246,0.07)",border:"1px solid rgba(139,92,246,0.18)",borderRadius:"10px"}}>
+                <div style={{color:"#a78bfa",fontSize:"0.68rem",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.5rem"}}>✨ Análise da IA</div>
+                <div style={{color:"#c4b5fd",fontSize:"0.82rem",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{aiMsg}</div>
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.8rem",marginBottom:"1.2rem"}}>
+              {FIELDS.map(f => (
+                <Field key={f.key} label={`${f.label}${f.required?" *":""}`}>
+                  <Select value={mapping[f.key]||""} onChange={e=>setMapping(m=>({...m,[f.key]:e.target.value}))}>
+                    <option value="">— Ignorar —</option>
+                    {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                  </Select>
+                </Field>
+              ))}
+            </div>
+
+            <div style={{background:C.bgDeep,borderRadius:"10px",padding:"0.8rem 1rem",marginBottom:"1.2rem",border:C.border,overflowX:"auto"}}>
+              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Primeiras 3 linhas do ficheiro</div>
+              <table style={{borderCollapse:"collapse",fontSize:"0.75rem",width:"100%"}}>
+                <thead>
+                  <tr>{headers.map(h=><th key={h} style={{color:"#334155",padding:"4px 8px",textAlign:"left",whiteSpace:"nowrap",borderBottom:C.borderFaint}}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rawRows.slice(0,3).map((r,i)=>(
+                    <tr key={i}>{r.map((c,j)=><td key={j} style={{color:"#64748b",padding:"4px 8px",whiteSpace:"nowrap"}}>{String(c).slice(0,25)}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end"}}>
+              <Btn onClick={()=>setStep("upload")} variant="secondary">← Voltar</Btn>
+              <Btn onClick={buildPreview} icon="arrow">Ver Preview →</Btn>
+            </div>
+          </div>
+        )}
+
+        {/* PREVIEW */}
+        {step==="preview" && (
+          <div>
+            <div style={{display:"flex",gap:"0.8rem",marginBottom:"1.2rem"}}>
+              <div style={{flex:1,padding:"0.9rem",background:"rgba(52,211,153,0.07)",border:"1px solid rgba(52,211,153,0.18)",borderRadius:"12px",textAlign:"center"}}>
+                <div style={{color:"#34d399",fontSize:"1.6rem",fontWeight:700,fontFamily:"'Syne',sans-serif"}}>{okCount}</div>
+                <div style={{color:"#475569",fontSize:"0.72rem",marginTop:"2px"}}>prontos para importar</div>
+              </div>
+              <div style={{flex:1,padding:"0.9rem",background:"rgba(248,113,113,0.07)",border:"1px solid rgba(248,113,113,0.18)",borderRadius:"12px",textAlign:"center"}}>
+                <div style={{color:"#f87171",fontSize:"1.6rem",fontWeight:700,fontFamily:"'Syne',sans-serif"}}>{badCount}</div>
+                <div style={{color:"#475569",fontSize:"0.72rem",marginTop:"2px"}}>com erros (ignorados)</div>
+              </div>
+            </div>
+
+            {errors.length > 0 && (
+              <div style={{marginBottom:"1rem",padding:"0.8rem 1rem",background:"rgba(239,68,68,0.05)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"10px",maxHeight:"100px",overflowY:"auto"}}>
+                <div style={{color:"#f87171",fontSize:"0.68rem",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"0.4rem"}}>Erros encontrados</div>
+                {errors.map((e,i)=><div key={i} style={{color:"#fca5a5",fontSize:"0.77rem",lineHeight:1.7}}>{e}</div>)}
+              </div>
+            )}
+
+            <div style={{overflowX:"auto",maxHeight:"300px",overflowY:"auto",borderRadius:"10px",border:C.border}}>
+              <table style={{borderCollapse:"collapse",fontSize:"0.78rem",width:"100%"}}>
+                <thead style={{position:"sticky",top:0,background:"#091422",zIndex:1}}>
+                  <tr>
+                    {["","Data","Req.","Cliente","Produto","Qtd.","V.Unit","Total"].map((h,i)=>(
+                      <th key={i} style={{padding:"0.65rem 0.8rem",textAlign:i>4?"right":"left",color:"#334155",fontWeight:600,fontSize:"0.65rem",textTransform:"uppercase",letterSpacing:"0.08em",borderBottom:C.borderFaint,whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((r,i)=>(
+                    <tr key={i} style={{borderBottom:C.borderFaint,background:r._ok?"transparent":"rgba(239,68,68,0.03)"}}>
+                      <td style={{padding:"0.55rem 0.8rem",textAlign:"center"}}>
+                        {r._ok
+                          ? <span style={{color:"#34d399",fontSize:"0.85rem"}}>✓</span>
+                          : <span title={r._errs.join(", ")} style={{color:"#f87171",fontSize:"0.85rem",cursor:"help"}}>✗</span>
+                        }
+                      </td>
+                      <td style={{padding:"0.55rem 0.8rem",color:"#64748b",whiteSpace:"nowrap"}}>{r.data}</td>
+                      <td style={{padding:"0.55rem 0.8rem",color:"#64748b"}}>{r.reqNum||"—"}</td>
+                      <td style={{padding:"0.55rem 0.8rem",color:r.clienteId?"#e2e8f0":"#f87171",fontWeight:r.clienteId?400:600}}>{r.clienteStr}</td>
+                      <td style={{padding:"0.55rem 0.8rem",color:r.produtoId?"#e2e8f0":"#f87171",fontWeight:r.produtoId?400:600}}>{r.produtoStr}</td>
+                      <td style={{padding:"0.55rem 0.8rem",textAlign:"right",color:"#94a3b8"}}>{fmt(r.qtd)}</td>
+                      <td style={{padding:"0.55rem 0.8rem",textAlign:"right",color:"#94a3b8"}}>{fmt(r.valorUnit)}</td>
+                      <td style={{padding:"0.55rem 0.8rem",textAlign:"right",color:"#f1f5f9",fontWeight:600}}>{fmt(r.total)} MT</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1.2rem"}}>
+              <Btn onClick={()=>setStep("mapping")} variant="secondary">← Voltar</Btn>
+              <Btn onClick={doImport} icon="save" disabled={okCount===0 || importing}>
+                {importing ? `A importar... ${done}/${okCount}` : `Importar ${okCount} pedidos`}
+              </Btn>
+            </div>
+
+            {importing && (
+              <div style={{marginTop:"0.8rem"}}>
+                <div style={{height:"4px",background:"rgba(255,255,255,0.05)",borderRadius:"999px",overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${okCount?((done/okCount)*100):0}%`,background:"linear-gradient(90deg,#f59e0b,#d97706)",borderRadius:"999px",transition:"width 0.3s"}}/>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* DONE */}
+        {step==="done" && (
+          <div style={{textAlign:"center",padding:"2.5rem 1rem"}}>
+            <div style={{fontSize:"3.5rem",marginBottom:"1rem"}}>✅</div>
+            <div style={{color:"#34d399",fontWeight:700,fontSize:"1.1rem",marginBottom:"0.4rem"}}>{done} pedidos importados!</div>
+            {badCount>0 && <div style={{color:"#475569",fontSize:"0.82rem",marginBottom:"1.5rem"}}>{badCount} linhas ignoradas por erros.</div>}
+            <Btn onClick={onClose} icon="check">Fechar</Btn>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // ORDERS
 // ════════════════════════════════════════════════════════════════════════════
 function Orders({ orders, clients, products, payments, onSave, onDelete }) {
-  const [search, setSearch] = useState("");
-  const [modal, setModal]   = useState(false);
-  const [form, setForm]     = useState({});
+  const [search, setSearch]       = useState("");
+  const [modal, setModal]         = useState(false);
+  const [importModal, setImportModal] = useState(false);
+  const [form, setForm]           = useState({});
   const [filterPag, setFilterPag] = useState("todos");
 
   const openNew  = () => { setForm({data:new Date().toISOString().split("T")[0],reqNum:"",clienteId:clients[0]?.id||"",produtoId:products[0]?.id||"",qtd:"",valorUnit:products[0]?.preco||0}); setModal(true); };
@@ -1316,20 +1606,25 @@ function Orders({ orders, clients, products, payments, onSave, onDelete }) {
   });
 
   const filtered = allWithPag.filter(o=>{
-    const c=clients.find(x=>x.id===o.clienteId);const p=products.find(x=>x.id===o.produtoId);
+    const c=clients.find(x=>x.id===o.clienteId); const p=products.find(x=>x.id===o.produtoId);
     return (!search||(o.reqNum||"").includes(search)||(c?.nome||"").toLowerCase().includes(search.toLowerCase())||(p?.nome||"").toLowerCase().includes(search.toLowerCase()))
       &&(filterPag==="todos"||o.estadoPag===filterPag);
   }).sort((a,b)=>new Date(b.data)-new Date(a.data));
 
-  const totalFiltered=filtered.reduce((s,o)=>s+o.total,0);
-  const dividaFiltered=filtered.reduce((s,o)=>s+(o.valorDivida||0),0);
+  const totalFiltered   = filtered.reduce((s,o)=>s+o.total,0);
+  const dividaFiltered  = filtered.reduce((s,o)=>s+(o.valorDivida||0),0);
 
   return (
     <div>
       <PageHeader
         title="Pedidos"
         sub={<>{filtered.length} pedidos · {fmt(totalFiltered)} MT · Em dívida: <span style={{color:"#f87171"}}>{fmt(dividaFiltered)} MT</span></>}
-        action={<Btn onClick={openNew} icon="plus">Novo Pedido</Btn>}
+        action={
+          <div style={{display:"flex",gap:"0.6rem"}}>
+            <Btn onClick={()=>setImportModal(true)} variant="ghost" icon="file">Importar Excel</Btn>
+            <Btn onClick={openNew} icon="plus">Novo Pedido</Btn>
+          </div>
+        }
       />
 
       <div style={{background:C.bg,border:C.border,borderRadius:"14px",padding:"0.75rem 1rem",marginBottom:"1.2rem",display:"flex",gap:"1rem",alignItems:"center",flexWrap:"wrap"}}>
@@ -1347,7 +1642,7 @@ function Orders({ orders, clients, products, payments, onSave, onDelete }) {
       <Card>
         <Table headers={["Data","Req.","Cliente","Produto","Qtd.","P.Unit.","Total","Pago","Em Dívida","Pag.","Ações"]}>
           {filtered.map(o=>{
-            const c=clients.find(x=>x.id===o.clienteId);const p=products.find(x=>x.id===o.produtoId);
+            const c=clients.find(x=>x.id===o.clienteId); const p=products.find(x=>x.id===o.produtoId);
             return (
               <TR key={o.id}>
                 <TD muted>{fmtDate(o.data)}</TD>
@@ -1371,6 +1666,8 @@ function Orders({ orders, clients, products, payments, onSave, onDelete }) {
         </Table>
         {filtered.length===0&&<div style={{textAlign:"center",padding:"3rem",color:"#475569"}}>Nenhum pedido encontrado</div>}
       </Card>
+
+      {importModal && <ExcelImportModal clients={clients} products={products} onImport={onSave} onClose={()=>setImportModal(false)}/>}
 
       {modal&&(
         <Modal title={form.id?"Editar Pedido":"Novo Pedido"} onClose={()=>setModal(false)}>
@@ -1407,6 +1704,7 @@ function Orders({ orders, clients, products, payments, onSave, onDelete }) {
     </div>
   );
 }
+
 
 // ════════════════════════════════════════════════════════════════════════════
 // REPORTS
@@ -2176,10 +2474,30 @@ export default function App() {
   );
 
   return (
-    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",display:"flex",color:"#e2e8f0"}}>
-      <aside style={{width:sideOpen?"240px":"64px",minHeight:"100vh",background:"#080f1c",borderRight:"1px solid rgba(255,255,255,0.04)",display:"flex",flexDirection:"column",flexShrink:0,transition:"width 0.28s cubic-bezier(.4,0,.2,1)",overflow:"hidden",position:"relative"}}>
-        <div style={{position:"absolute",top:0,left:0,width:"2px",height:"100%",background:"linear-gradient(180deg,#f59e0b40 0%,transparent 60%)"}}/>
-        <div style={{padding:"1.3rem 1rem 1.1rem",borderBottom:"1px solid rgba(255,255,255,0.04)",display:"flex",alignItems:"center",gap:"10px",minHeight:"64px"}}>
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",display:"flex",color:"#e2e8f0",position:"relative"}}>
+      <aside style={{width:sideOpen?"240px":"64px",minHeight:"100vh",background:"#080f1c",borderRight:"1px solid rgba(255,255,255,0.04)",display:"flex",flexDirection:"column",flexShrink:0,transition:"width 0.28s cubic-bezier(.4,0,.2,1)",overflow:"visible",position:"relative"}}>
+        <div style={{position:"absolute",top:0,left:0,width:"2px",height:"100%",background:"linear-gradient(180deg,#f59e0b40 0%,transparent 60%)",zIndex:0}}/>
+
+        {/* ── Seta flutuante de colapso ── */}
+        <button
+          onClick={()=>setSideOpen(s=>!s)}
+          title={sideOpen?"Esconder menu":"Mostrar menu"}
+          style={{
+            position:"absolute", top:"50%", right:"-14px", transform:"translateY(-50%)",
+            width:"28px", height:"28px", borderRadius:"50%",
+            background:"#0f1e30", border:"1px solid rgba(255,255,255,0.1)",
+            color:"#475569", cursor:"pointer", display:"flex", alignItems:"center",
+            justifyContent:"center", zIndex:50, boxShadow:"0 2px 8px rgba(0,0,0,0.4)",
+            transition:"all 0.2s",
+          }}
+          onMouseEnter={e=>{e.currentTarget.style.background="#1e3a5f";e.currentTarget.style.color="#f59e0b";e.currentTarget.style.borderColor="rgba(245,158,11,0.3)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="#0f1e30";e.currentTarget.style.color="#475569";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";}}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{transform:sideOpen?"rotate(0deg)":"rotate(180deg)",transition:"transform 0.28s cubic-bezier(.4,0,.2,1)"}}>
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </button>        <div style={{padding:"1.3rem 1rem 1.1rem",borderBottom:"1px solid rgba(255,255,255,0.04)",display:"flex",alignItems:"center",gap:"10px",minHeight:"64px"}}>
           <div style={{width:"34px",height:"34px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 4px 12px rgba(245,158,11,0.3)"}}>
             <Icon name="fuel" size={16}/>
           </div>
@@ -2206,12 +2524,6 @@ export default function App() {
             );
           })}
         </nav>
-        <div style={{padding:"0.7rem 0.5rem",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-          <button onClick={()=>setSideOpen(s=>!s)} style={{width:"100%",display:"flex",alignItems:"center",gap:"9px",padding:"0.55rem 0.75rem",borderRadius:"10px",border:"none",background:"transparent",color:"#334155",cursor:"pointer",whiteSpace:"nowrap"}}>
-            <span style={{transform:sideOpen?"":"rotate(180deg)",display:"flex",transition:"transform 0.28s"}}><Icon name="collapse" size={15}/></span>
-            {sideOpen&&<span style={{fontSize:"0.78rem"}}>Recolher</span>}
-          </button>
-        </div>
       </aside>
 
       <main style={{flex:1,padding:"2rem 2.2rem",overflowX:"auto",minWidth:0,background:"#060d18"}}>
