@@ -3114,9 +3114,25 @@ export default function App() {
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState(null);
 
+  const loadAll = async () => {
+    setLoading(true); setError(null);
+    try {
+      const [ {data:cls,error:e1},{data:prds,error:e2},{data:ords,error:e3},{data:pays,error:e4},{data:hist,error:e5},{data:invs,error:e6} ] = await Promise.all([
+        supabase.from('clients').select('*').order('nome'),
+        supabase.from('products').select('*').order('nome'),
+        supabase.from('orders').select('*').order('data',{ascending:false}),
+        supabase.from('payments').select('*').order('data',{ascending:false}),
+        supabase.from('price_history').select('*').order('data',{ascending:false}),
+        supabase.from('invoices').select('*').order('emitida_em',{ascending:false}),
+      ]);
+      if (e1||e2||e3||e4||e5||e6) throw (e1||e2||e3||e4||e5||e6);
+      setClients(cls||[]); setProducts(prds||[]); setOrders(ords||[]); setPayments(pays||[]); setPriceHistory(hist||[]); setInvoices(invs||[]);
+    } catch(err) { setError(err.message); }
+    finally { setLoading(false); }
+  };
+
   useEffect(() => {
     setupFonts();
-    // Check auth state
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) { setUser(session.user); loadProfile(session.user.id); }
       else setAuthLoading(false);
@@ -3127,6 +3143,10 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user && profile && profile.role === 'admin') loadAll();
+  }, [user, profile]);
 
   const loadProfile = async (userId) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
@@ -3182,24 +3202,6 @@ export default function App() {
   if (profile?.role === 'operador') return <OperatorApp user={user} profile={profile} onLogout={handleLogout}/>;
 
   // ── Admin → App completo ──────────────────────────────────────────────
-  useEffect(() => { loadAll(); }, [user]);
-
-  const loadAll = async () => {
-    setLoading(true); setError(null);
-    try {
-      const [ {data:cls,error:e1},{data:prds,error:e2},{data:ords,error:e3},{data:pays,error:e4},{data:hist,error:e5},{data:invs,error:e6} ] = await Promise.all([
-        supabase.from('clients').select('*').order('nome'),
-        supabase.from('products').select('*').order('nome'),
-        supabase.from('orders').select('*').order('data',{ascending:false}),
-        supabase.from('payments').select('*').order('data',{ascending:false}),
-        supabase.from('price_history').select('*').order('data',{ascending:false}),
-        supabase.from('invoices').select('*').order('emitida_em',{ascending:false}),
-      ]);
-      if (e1||e2||e3||e4||e5||e6) throw (e1||e2||e3||e4||e5||e6);
-      setClients(cls||[]); setProducts(prds||[]); setOrders(ords||[]); setPayments(pays||[]); setPriceHistory(hist||[]); setInvoices(invs||[]);
-    } catch(err) { setError(err.message); }
-    finally { setLoading(false); }
-  };
 
   const saveClient  = async (c) => { const {id,...d}=c; if(clients.some(x=>x.id===id)){const{data:u}=await supabase.from('clients').update(d).eq('id',id).select().single();if(u)setClients(cs=>cs.map(x=>x.id===id?u:x));}else{const{data:cr}=await supabase.from('clients').insert(d).select().single();if(cr)setClients(cs=>[...cs,cr]);} };
   const delClient   = async (id) => { await supabase.from('clients').delete().eq('id',id); setClients(cs=>cs.filter(x=>x.id!==id)); };
