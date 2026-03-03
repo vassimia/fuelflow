@@ -2258,14 +2258,850 @@ function Faturas({ clients, orders, products, payments, invoices, onSave, onDele
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// MAIN APP
-// ════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════════════
-// MAIN APP — com Supabase
+// LOGIN SCREEN
 // ════════════════════════════════════════════════════════════════════════════
+function LoginScreen({ onLogin }) {
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
 
+  useEffect(() => {
+    const l1=document.createElement("link");l1.rel="preconnect";l1.href="https://fonts.googleapis.com";document.head.appendChild(l1);
+    const l2=document.createElement("link");l2.rel="stylesheet";l2.href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap";document.head.appendChild(l2);
+    const style=document.createElement("style");
+    style.textContent=`*{box-sizing:border-box}body{margin:0}input:focus{border-color:rgba(245,158,11,0.6)!important;box-shadow:0 0 0 3px rgba(245,158,11,0.08)!important;outline:none!important}`;
+    document.head.appendChild(style);
+  }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError("");
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) { setError("Email ou senha incorrectos."); setLoading(false); }
+    else onLogin();
+  };
+
+  return (
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+      {/* Background glow */}
+      <div style={{position:"fixed",top:"-20%",left:"50%",transform:"translateX(-50%)",width:"600px",height:"600px",background:"radial-gradient(circle,rgba(245,158,11,0.06) 0%,transparent 70%)",pointerEvents:"none"}}/>
+
+      <div style={{width:"100%",maxWidth:"400px"}}>
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:"2.5rem"}}>
+          <div style={{width:"56px",height:"56px",borderRadius:"16px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1rem",boxShadow:"0 8px 24px rgba(245,158,11,0.3)"}}>
+            <Icon name="fuel" size={26}/>
+          </div>
+          <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.6rem",letterSpacing:"-0.03em"}}>FuelFlow</div>
+          <div style={{color:"#334155",fontSize:"0.78rem",marginTop:"4px",textTransform:"uppercase",letterSpacing:"0.12em"}}>Gestão de Combustíveis</div>
+        </div>
+
+        {/* Card */}
+        <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"20px",padding:"2rem",boxShadow:"0 24px 64px rgba(0,0,0,0.5)"}}>
+          <div style={{color:"#94a3b8",fontSize:"0.85rem",marginBottom:"1.8rem",textAlign:"center"}}>Entra na tua conta para continuar</div>
+
+          <form onSubmit={handleLogin}>
+            <div style={{marginBottom:"1rem"}}>
+              <label style={{display:"block",color:"#475569",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"7px"}}>Email</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="o.teu@email.com"
+                style={{width:"100%",padding:"0.7rem 1rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",transition:"all 0.15s"}}/>
+            </div>
+            <div style={{marginBottom:"1.5rem"}}>
+              <label style={{display:"block",color:"#475569",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"7px"}}>Senha</label>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••"
+                style={{width:"100%",padding:"0.7rem 1rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",transition:"all 0.15s"}}/>
+            </div>
+
+            {error && (
+              <div style={{padding:"0.7rem 1rem",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",color:"#f87171",fontSize:"0.82rem",marginBottom:"1rem",textAlign:"center"}}>
+                {error}
+              </div>
+            )}
+
+            <button type="submit" disabled={loading}
+              style={{width:"100%",padding:"0.75rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:loading?"wait":"pointer",opacity:loading?0.7:1,transition:"all 0.2s",boxShadow:"0 4px 16px rgba(245,158,11,0.25)",fontFamily:"inherit"}}>
+              {loading ? "A entrar..." : "Entrar"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// OPERATOR APP — Registo de Turno
+// ════════════════════════════════════════════════════════════════════════════
+function OperatorApp({ user, profile, onLogout }) {
+  const [shift, setShift]         = useState(null);   // turno activo
+  const [hoses, setHoses]         = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [tab, setTab]             = useState("caixa"); // caixa | pedidos | contadores
+  const [cashEntries, setCashEntries] = useState([]);
+  const [shiftOrders, setShiftOrders] = useState([]);
+  const [hoseReadings, setHoseReadings] = useState([]);
+  const [saving, setSaving]       = useState(false);
+  const [closingShift, setClosingShift] = useState(false);
+
+  // Cash form
+  const [cashForm, setCashForm]   = useState({ method:"Cash", type:"entrada", valor:"", notas:"" });
+  // Order form
+  const [orderForm, setOrderForm] = useState({ notas:"", photoFile:null, photoPreview:null });
+  // Final readings for close
+  const [finalReadings, setFinalReadings] = useState({});
+
+  const METODOS = ["Cash","e-Mola","M-Pesa","POS BIM","POS STB","POS Moza","POS BCI"];
+  const METODO_COLORS = {"Cash":"#f59e0b","e-Mola":"#10b981","M-Pesa":"#3b82f6","POS BIM":"#8b5cf6","POS STB":"#06b6d4","POS Moza":"#f43f5e","POS BCI":"#f97316"};
+
+  useEffect(() => { loadOperatorData(); }, []);
+
+  const loadOperatorData = async () => {
+    setLoadingData(true);
+    // Load hoses
+    const { data: hosesData } = await supabase.from('hoses').select('*').order('numero');
+    setHoses(hosesData || []);
+    // Check for open shift today
+    const today = new Date().toISOString().split("T")[0];
+    const { data: shiftData } = await supabase
+      .from('shifts')
+      .select('*')
+      .eq('operador_id', user.id)
+      .eq('data', today)
+      .eq('status', 'aberto')
+      .single();
+    if (shiftData) {
+      setShift(shiftData);
+      // Load existing entries
+      const [{ data: ce }, { data: so }, { data: hr }] = await Promise.all([
+        supabase.from('cash_entries').select('*').eq('turno_id', shiftData.id).order('created_at'),
+        supabase.from('shift_orders').select('*').eq('turno_id', shiftData.id).order('created_at'),
+        supabase.from('hose_readings').select('*').eq('turno_id', shiftData.id),
+      ]);
+      setCashEntries(ce || []);
+      setShiftOrders(so || []);
+      const readingsMap = {};
+      (hr||[]).forEach(r => { readingsMap[r.mangueira_id] = r; });
+      setHoseReadings(readingsMap);
+      const finals = {};
+      (hr||[]).forEach(r => { finals[r.mangueira_id] = r.leitura_final || ""; });
+      setFinalReadings(finals);
+    }
+    setLoadingData(false);
+  };
+
+  // ── Abrir turno ───────────────────────────────────────────────────────
+  const [startReadings, setStartReadings] = useState({});
+  const [startingShift, setStartingShift] = useState(false);
+
+  const openShift = async () => {
+    setStartingShift(true);
+    const today = new Date().toISOString().split("T")[0];
+    const { data: newShift } = await supabase.from('shifts').insert({
+      operador_id: user.id,
+      operador_nome: profile?.nome || user.email,
+      data: today,
+      status: 'aberto',
+      aberto_em: new Date().toISOString(),
+    }).select().single();
+    if (newShift) {
+      // Save initial readings
+      for (const [hoseId, leitura] of Object.entries(startReadings)) {
+        if (leitura) {
+          await supabase.from('hose_readings').insert({
+            turno_id: newShift.id,
+            mangueira_id: parseInt(hoseId),
+            leitura_inicial: parseFloat(leitura) || 0,
+            leitura_final: null,
+          });
+        }
+      }
+      setShift(newShift);
+      await loadOperatorData();
+    }
+    setStartingShift(false);
+  };
+
+  // ── Registar entrada/saída de caixa ──────────────────────────────────
+  const saveCashEntry = async () => {
+    if (!cashForm.valor || parseFloat(cashForm.valor) <= 0) return;
+    setSaving(true);
+    const { data } = await supabase.from('cash_entries').insert({
+      turno_id: shift.id,
+      metodo: cashForm.method,
+      tipo: cashForm.type,
+      valor: parseFloat(cashForm.valor),
+      notas: cashForm.notas,
+    }).select().single();
+    if (data) setCashEntries(e => [...e, data]);
+    setCashForm(f => ({ ...f, valor:"", notas:"" }));
+    setSaving(false);
+  };
+
+  // ── Registar pedido com foto ──────────────────────────────────────────
+  const handlePhoto = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setOrderForm(f => ({ ...f, photoFile: file, photoPreview: ev.target.result }));
+    reader.readAsDataURL(file);
+  };
+
+  const saveOrder = async () => {
+    setSaving(true);
+    let photoUrl = null;
+    if (orderForm.photoFile) {
+      const ext  = orderForm.photoFile.name.split('.').pop();
+      const path = `pedidos/${shift.id}_${Date.now()}.${ext}`;
+      const { data: up } = await supabase.storage.from('shift-photos').upload(path, orderForm.photoFile);
+      if (up) {
+        const { data: url } = supabase.storage.from('shift-photos').getPublicUrl(path);
+        photoUrl = url?.publicUrl;
+      }
+    }
+    const { data } = await supabase.from('shift_orders').insert({
+      turno_id: shift.id,
+      notas: orderForm.notas,
+      foto_url: photoUrl,
+    }).select().single();
+    if (data) setShiftOrders(o => [...o, data]);
+    setOrderForm({ notas:"", photoFile:null, photoPreview:null });
+    setSaving(false);
+  };
+
+  // ── Salvar leituras finais ────────────────────────────────────────────
+  const saveFinalReading = async (hoseId, value) => {
+    setFinalReadings(r => ({ ...r, [hoseId]: value }));
+    const existing = hoseReadings[hoseId];
+    if (existing) {
+      await supabase.from('hose_readings').update({ leitura_final: parseFloat(value)||0 }).eq('id', existing.id);
+    }
+  };
+
+  // ── Fechar turno ──────────────────────────────────────────────────────
+  const closeShift = async () => {
+    setClosingShift(true);
+    await supabase.from('shifts').update({
+      status: 'fechado',
+      fechado_em: new Date().toISOString(),
+      total_entradas: cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0),
+      total_saidas: cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0),
+    }).eq('id', shift.id);
+    setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({});
+    setClosingShift(false);
+    alert("✅ Turno fechado com sucesso!");
+  };
+
+  // Totais
+  const totalEntradas  = cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0);
+  const totalSaidas    = cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0);
+  const saldoCaixa     = totalEntradas - totalSaidas;
+
+  const byMethod = METODOS.map(m => ({
+    m, total: cashEntries.filter(e=>e.tipo==='entrada'&&e.metodo===m).reduce((s,e)=>s+e.valor,0)
+  })).filter(x=>x.total>0);
+
+  if (loadingData) return (
+    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",color:"#475569"}}>
+      A carregar...
+    </div>
+  );
+
+  // ── SE não há turno aberto → Ecrã de início ──────────────────────────
+  if (!shift) return (
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",color:"#e2e8f0",padding:"1.5rem",maxWidth:"520px",margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"2rem"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Icon name="fuel" size={15}/>
+          </div>
+          <div>
+            <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.9rem"}}>FuelFlow</div>
+            <div style={{color:"#334155",fontSize:"0.65rem"}}>{profile?.nome || user.email}</div>
+          </div>
+        </div>
+        <button onClick={onLogout} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"8px",color:"#f87171",cursor:"pointer",padding:"0.4rem 0.8rem",fontSize:"0.75rem",fontWeight:600}}>Sair</button>
+      </div>
+
+      <div style={{textAlign:"center",padding:"1rem 0 2rem"}}>
+        <div style={{fontSize:"2.5rem",marginBottom:"0.5rem"}}>⛽</div>
+        <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"1.1rem",fontFamily:"'Syne',sans-serif"}}>Iniciar Turno</div>
+        <div style={{color:"#475569",fontSize:"0.82rem",marginTop:"4px"}}>{new Date().toLocaleDateString("pt-MZ",{weekday:"long",day:"numeric",month:"long"})}</div>
+      </div>
+
+      <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.5rem",marginBottom:"1.2rem"}}>
+        <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Leituras Iniciais dos Contadores</div>
+        {hoses.length === 0 && <div style={{color:"#475569",fontSize:"0.82rem",textAlign:"center",padding:"1rem"}}>Nenhuma mangueira configurada.<br/>Pede ao admin para configurar as mangueiras.</div>}
+        {hoses.map(h => (
+          <div key={h.id} style={{display:"flex",alignItems:"center",gap:"0.8rem",marginBottom:"0.8rem"}}>
+            <div style={{width:"8px",height:"8px",borderRadius:"50%",background:h.cor||"#f59e0b",flexShrink:0}}/>
+            <div style={{flex:1,color:"#cbd5e1",fontSize:"0.85rem",fontWeight:500}}>{h.nome} <span style={{color:"#475569",fontSize:"0.75rem"}}>({h.combustivel})</span></div>
+            <input type="number" step="0.01" placeholder="0.00" value={startReadings[h.id]||""}
+              onChange={e=>setStartReadings(r=>({...r,[h.id]:e.target.value}))}
+              style={{width:"110px",padding:"0.5rem 0.8rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"8px",color:"#e2e8f0",fontSize:"0.85rem",textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+            <span style={{color:"#475569",fontSize:"0.75rem"}}>L</span>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={openShift} disabled={startingShift}
+        style={{width:"100%",padding:"0.9rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.95rem",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.3)",fontFamily:"inherit",opacity:startingShift?0.7:1}}>
+        {startingShift?"A iniciar...":"▶ Iniciar Turno"}
+      </button>
+    </div>
+  );
+
+  // ── TURNO ACTIVO ─────────────────────────────────────────────────────
+  return (
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",color:"#e2e8f0",maxWidth:"560px",margin:"0 auto",padding:"1rem 1rem 6rem"}}>
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.2rem",padding:"0.2rem 0"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Icon name="fuel" size={15}/>
+          </div>
+          <div>
+            <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.88rem"}}>Turno Activo</div>
+            <div style={{color:"#334155",fontSize:"0.68rem"}}>{profile?.nome||user.email} · {new Date().toLocaleDateString("pt-MZ")}</div>
+          </div>
+        </div>
+        <button onClick={onLogout} style={{background:"transparent",border:"none",color:"#334155",cursor:"pointer",fontSize:"0.75rem"}}>Sair</button>
+      </div>
+
+      {/* Saldo rápido */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.6rem",marginBottom:"1.2rem"}}>
+        {[
+          {label:"Entradas",value:fmt(totalEntradas),color:"#34d399"},
+          {label:"Saídas",  value:fmt(totalSaidas),  color:"#f87171"},
+          {label:"Saldo",   value:fmt(saldoCaixa),   color:saldoCaixa>=0?"#60a5fa":"#f87171"},
+        ].map(({label,value,color})=>(
+          <div key={label} style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:"12px",padding:"0.8rem 0.7rem",textAlign:"center"}}>
+            <div style={{color:"#334155",fontSize:"0.65rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</div>
+            <div style={{color,fontSize:"0.95rem",fontWeight:700,fontFamily:"'Syne',sans-serif",marginTop:"3px"}}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:"4px",marginBottom:"1.2rem",background:"rgba(255,255,255,0.03)",padding:"4px",borderRadius:"12px"}}>
+        {[["caixa","💰 Caixa"],["pedidos","📋 Pedidos"],["contadores","⛽ Contadores"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"0.55rem 0.3rem",borderRadius:"9px",border:"none",background:tab===t?"linear-gradient(135deg,#f59e0b,#d97706)":  "transparent",color:tab===t?"#000":"#475569",fontWeight:tab===t?700:400,fontSize:"0.75rem",cursor:"pointer",transition:"all 0.15s",fontFamily:"inherit"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TAB: CAIXA ── */}
+      {tab==="caixa" && (
+        <div>
+          {/* Tipo entrada/saída */}
+          <div style={{display:"flex",gap:"6px",marginBottom:"0.8rem"}}>
+            {[["entrada","Entrada","#34d399"],["saida","Saída","#f87171"]].map(([v,l,c])=>(
+              <button key={v} onClick={()=>setCashForm(f=>({...f,type:v}))} style={{flex:1,padding:"0.6rem",borderRadius:"10px",border:`1px solid`,borderColor:cashForm.type===v?c+"50":"rgba(255,255,255,0.06)",background:cashForm.type===v?c+"12":"transparent",color:cashForm.type===v?c:"#475569",fontWeight:600,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit"}}>
+                {cashForm.type===v?(v==="entrada"?"▲ ":"▼ "):""}{l}
+              </button>
+            ))}
+          </div>
+
+          {/* Método */}
+          <div style={{marginBottom:"0.8rem"}}>
+            <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Método</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
+              {METODOS.map(m=>(
+                <button key={m} onClick={()=>setCashForm(f=>({...f,method:m}))} style={{padding:"5px 10px",borderRadius:"8px",border:"1px solid",borderColor:cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"50":"rgba(255,255,255,0.06)",background:cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"12":"transparent",color:cashForm.method===m?METODO_COLORS[m]||"#f59e0b":"#475569",fontSize:"0.76rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Valor + Notas */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem",marginBottom:"0.8rem"}}>
+            <div>
+              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Valor (MT) *</div>
+              <input type="number" step="0.01" placeholder="0.00" value={cashForm.valor}
+                onChange={e=>setCashForm(f=>({...f,valor:e.target.value}))}
+                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.95rem",fontWeight:600,fontFamily:"inherit",outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Notas</div>
+              <input type="text" placeholder="Opcional" value={cashForm.notas}
+                onChange={e=>setCashForm(f=>({...f,notas:e.target.value}))}
+                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit",outline:"none"}}/>
+            </div>
+          </div>
+
+          <button onClick={saveCashEntry} disabled={saving||!cashForm.valor}
+            style={{width:"100%",padding:"0.75rem",background:cashForm.type==="entrada"?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.88rem",cursor:"pointer",fontFamily:"inherit",marginBottom:"1.5rem",opacity:!cashForm.valor||saving?0.5:1}}>
+            {saving?"A guardar...":`${cashForm.type==="entrada"?"▲ Registar Entrada":"▼ Registar Saída"} · ${fmt(parseFloat(cashForm.valor)||0)} MT`}
+          </button>
+
+          {/* Resumo por método */}
+          {byMethod.length > 0 && (
+            <div style={{marginBottom:"1.2rem"}}>
+              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Entradas por Método</div>
+              {byMethod.map(({m,total})=>(
+                <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.03)"}}>
+                  <span style={{color:METODO_COLORS[m]||"#94a3b8",fontSize:"0.82rem",fontWeight:600}}>{m}</span>
+                  <span style={{color:"#e2e8f0",fontSize:"0.85rem",fontWeight:600}}>{fmt(total)} MT</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Histórico */}
+          {cashEntries.length > 0 && (
+            <div>
+              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Histórico do Turno ({cashEntries.length})</div>
+              {[...cashEntries].reverse().map(e=>(
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",border:`1px solid ${e.tipo==="entrada"?"rgba(52,211,153,0.1)":"rgba(248,113,113,0.1)"}`}}>
+                  <div>
+                    <div style={{color:"#e2e8f0",fontSize:"0.82rem",fontWeight:500}}>{e.metodo}{e.notas&&<span style={{color:"#334155"}}> · {e.notas}</span>}</div>
+                  </div>
+                  <div style={{color:e.tipo==="entrada"?"#34d399":"#f87171",fontWeight:700,fontSize:"0.88rem"}}>
+                    {e.tipo==="entrada"?"+":"-"}{fmt(e.valor)} MT
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: PEDIDOS ── */}
+      {tab==="pedidos" && (
+        <div>
+          <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"14px",padding:"1.2rem",marginBottom:"1rem"}}>
+            <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.8rem"}}>Registar Pedido / Requisição</div>
+
+            {/* Foto */}
+            <div style={{marginBottom:"0.8rem"}}>
+              {orderForm.photoPreview ? (
+                <div style={{position:"relative"}}>
+                  <img src={orderForm.photoPreview} alt="preview" style={{width:"100%",maxHeight:"180px",objectFit:"cover",borderRadius:"10px",border:"1px solid rgba(255,255,255,0.06)"}}/>
+                  <button onClick={()=>setOrderForm(f=>({...f,photoFile:null,photoPreview:null}))}
+                    style={{position:"absolute",top:"8px",right:"8px",background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",color:"#fff",width:"28px",height:"28px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"0.8rem"}}>✕</button>
+                </div>
+              ) : (
+                <label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px",padding:"1.5rem",background:"rgba(255,255,255,0.02)",border:"1px dashed rgba(255,255,255,0.1)",borderRadius:"10px",cursor:"pointer"}}>
+                  <span style={{fontSize:"1.8rem"}}>📷</span>
+                  <span style={{color:"#475569",fontSize:"0.8rem"}}>Tirar foto / Escolher imagem</span>
+                  <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{display:"none"}}/>
+                </label>
+              )}
+            </div>
+
+            {/* Notas */}
+            <div style={{marginBottom:"0.8rem"}}>
+              <textarea value={orderForm.notas} onChange={e=>setOrderForm(f=>({...f,notas:e.target.value}))}
+                placeholder="Notas do pedido (nº requisição, cliente, observações...)" rows={3}
+                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit",resize:"vertical",outline:"none"}}/>
+            </div>
+
+            <button onClick={saveOrder} disabled={saving||(!orderForm.notas&&!orderForm.photoFile)}
+              style={{width:"100%",padding:"0.7rem",background:"linear-gradient(135deg,#3b82f6,#2563eb)",color:"#fff",border:"none",borderRadius:"10px",fontWeight:600,fontSize:"0.85rem",cursor:"pointer",fontFamily:"inherit",opacity:(!orderForm.notas&&!orderForm.photoFile)||saving?0.5:1}}>
+              {saving?"A guardar...":"📋 Guardar Pedido"}
+            </button>
+          </div>
+
+          {/* Lista pedidos */}
+          {shiftOrders.length === 0 && <div style={{textAlign:"center",padding:"2rem",color:"#334155",fontSize:"0.82rem"}}>Nenhum pedido registado ainda</div>}
+          {[...shiftOrders].reverse().map(o=>(
+            <div key={o.id} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:"12px",overflow:"hidden",marginBottom:"0.6rem"}}>
+              {o.foto_url && <img src={o.foto_url} alt="pedido" style={{width:"100%",maxHeight:"140px",objectFit:"cover"}} onClick={()=>window.open(o.foto_url,'_blank')}/>}
+              {o.notas && <div style={{padding:"0.7rem 0.9rem",color:"#94a3b8",fontSize:"0.82rem"}}>{o.notas}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── TAB: CONTADORES ── */}
+      {tab==="contadores" && (
+        <div>
+          <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"14px",padding:"1.2rem",marginBottom:"1rem"}}>
+            <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Leituras Finais dos Contadores</div>
+            {hoses.map(h=>{
+              const reading = hoseReadings[h.id];
+              const inicial = reading?.leitura_inicial ?? "—";
+              const final_  = finalReadings[h.id] ?? "";
+              const litros  = reading && final_ ? Math.max(0, parseFloat(final_) - parseFloat(inicial)) : null;
+              return (
+                <div key={h.id} style={{marginBottom:"1rem",padding:"0.9rem",background:"rgba(0,0,0,0.25)",borderRadius:"10px",border:"1px solid rgba(255,255,255,0.04)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"0.6rem"}}>
+                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:h.cor||"#f59e0b"}}/>
+                    <span style={{color:"#e2e8f0",fontSize:"0.85rem",fontWeight:600}}>{h.nome}</span>
+                    <span style={{color:"#334155",fontSize:"0.75rem"}}>({h.combustivel})</span>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem"}}>
+                    <div>
+                      <div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Inicial</div>
+                      <div style={{color:"#60a5fa",fontSize:"0.9rem",fontWeight:600}}>{fmt(inicial)} L</div>
+                    </div>
+                    <div>
+                      <div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Final</div>
+                      <input type="number" step="0.01" placeholder="0.00" value={final_}
+                        onChange={e=>saveFinalReading(h.id, e.target.value)}
+                        style={{width:"100%",padding:"0.4rem 0.7rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"8px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",outline:"none"}}/>
+                    </div>
+                  </div>
+                  {litros !== null && litros >= 0 && (
+                    <div style={{marginTop:"0.5rem",padding:"0.4rem 0.7rem",background:"rgba(245,158,11,0.08)",borderRadius:"8px",color:"#fbbf24",fontSize:"0.82rem",fontWeight:600,textAlign:"center"}}>
+                      ⛽ {fmt(litros)} L vendidos
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Botão fechar turno - fixo em baixo */}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:"560px",padding:"1rem",background:"linear-gradient(to top,#060d18 70%,transparent)",zIndex:100}}>
+        <button onClick={()=>{ if(window.confirm("Tens a certeza que queres fechar o turno?")) closeShift(); }}
+          disabled={closingShift}
+          style={{width:"100%",padding:"0.85rem",background:"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 16px rgba(239,68,68,0.3)",opacity:closingShift?0.7:1}}>
+          {closingShift?"A fechar...":"🔒 Fechar Turno"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN — GESTÃO DE MANGUEIRAS
+// ════════════════════════════════════════════════════════════════════════════
+function HosesAdmin() {
+  const [hoses, setHoses]   = useState([]);
+  const [modal, setModal]   = useState(false);
+  const [form, setForm]     = useState({});
+  const [loading, setLoading] = useState(true);
+
+  const COMBUSTIVEIS = ["Gasolina","Diesel","Petróleo","Óleo Motor"];
+  const CORES = ["#f59e0b","#3b82f6","#8b5cf6","#10b981","#f43f5e","#06b6d4","#f97316"];
+
+  useEffect(() => { load(); }, []);
+  const load = async () => { const { data } = await supabase.from('hoses').select('*').order('numero'); setHoses(data||[]); setLoading(false); };
+  const openNew  = () => { setForm({ nome:"", combustivel:"Gasolina", numero:"", cor:"#f59e0b" }); setModal(true); };
+  const openEdit = (h) => { setForm({...h}); setModal(true); };
+  const handleSave = async () => {
+    if (!form.nome) return;
+    const { id, ...data } = form;
+    if (id) { await supabase.from('hoses').update(data).eq('id',id); }
+    else     { await supabase.from('hoses').insert(data); }
+    setModal(false); load();
+  };
+  const handleDelete = async (id) => { if(window.confirm("Eliminar mangueira?")) { await supabase.from('hoses').delete().eq('id',id); load(); } };
+
+  return (
+    <div>
+      <PageHeader title="Mangueiras / Bombas" sub="Configura as mangueiras para os operadores"
+        action={<Btn onClick={openNew} icon="plus">Nova Mangueira</Btn>}/>
+      <Card>
+        {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
+          <Table headers={["Nº","Nome","Combustível","Cor","Ações"]}>
+            {hoses.map(h=>(
+              <TR key={h.id}>
+                <TD bold>{h.numero||"—"}</TD>
+                <TD><div style={{display:"flex",alignItems:"center",gap:"8px"}}><div style={{width:"10px",height:"10px",borderRadius:"50%",background:h.cor}}/>{h.nome}</div></TD>
+                <TD>{h.combustivel}</TD>
+                <TD><div style={{width:"24px",height:"24px",borderRadius:"6px",background:h.cor,border:"1px solid rgba(255,255,255,0.1)"}}/></TD>
+                <TD><div style={{display:"flex",gap:"5px"}}>
+                  <IconBtn onClick={()=>openEdit(h)} icon="edit" color="#f59e0b"/>
+                  <IconBtn onClick={()=>handleDelete(h.id)} icon="trash" color="#f87171"/>
+                </div></TD>
+              </TR>
+            ))}
+          </Table>
+        )}
+        {!loading&&hoses.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhuma mangueira. Clica em "Nova Mangueira" para começar.</div>}
+      </Card>
+      {modal&&(
+        <Modal title={form.id?"Editar Mangueira":"Nova Mangueira"} onClose={()=>setModal(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Nome *"><Input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="ex: Mangueira 1"/></Field>
+            <Field label="Nº Bomba"><Input value={form.numero||""} onChange={e=>setForm(f=>({...f,numero:e.target.value}))} placeholder="1"/></Field>
+          </div>
+          <Field label="Combustível">
+            <Select value={form.combustivel||"Gasolina"} onChange={e=>setForm(f=>({...f,combustivel:e.target.value}))}>
+              {COMBUSTIVEIS.map(c=><option key={c} value={c}>{c}</option>)}
+            </Select>
+          </Field>
+          <Field label="Cor">
+            <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+              {CORES.map(c=>(
+                <button key={c} onClick={()=>setForm(f=>({...f,cor:c}))}
+                  style={{width:"32px",height:"32px",borderRadius:"8px",background:c,border:`2px solid ${form.cor===c?"#fff":"transparent"}`,cursor:"pointer"}}/>
+              ))}
+            </div>
+          </Field>
+          <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1rem"}}>
+            <Btn onClick={()=>setModal(false)} variant="secondary">Cancelar</Btn>
+            <Btn onClick={handleSave} icon="save">Guardar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN — GESTÃO DE UTILIZADORES
+// ════════════════════════════════════════════════════════════════════════════
+function UsersAdmin({ currentUser }) {
+  const [profiles, setProfiles] = useState([]);
+  const [modal, setModal]       = useState(false);
+  const [form, setForm]         = useState({});
+  const [saving, setSaving]     = useState(false);
+  const [loading, setLoading]   = useState(true);
+
+  useEffect(() => { load(); }, []);
+  const load = async () => { const { data } = await supabase.from('profiles').select('*').order('nome'); setProfiles(data||[]); setLoading(false); };
+
+  const openNew = () => { setForm({ email:"", nome:"", role:"operador", password:"" }); setModal(true); };
+
+  const handleSave = async () => {
+    if (!form.email||!form.nome||!form.password) return;
+    setSaving(true);
+    // Create user in Supabase Auth (requires service role - workaround: use signUp)
+    const { data: authData, error: authErr } = await supabase.auth.admin?.createUser?.({
+      email: form.email, password: form.password, email_confirm: true,
+    }) || { error: { message: "Usa o painel Supabase para criar utilizadores" }};
+
+    if (authErr) {
+      alert(`Para criar utilizadores:\n1. Vai ao Supabase → Authentication → Users → Invite\n2. Depois edita o perfil aqui para definir o papel (Admin/Operador)`);
+      setSaving(false); return;
+    }
+    if (authData?.user) {
+      await supabase.from('profiles').upsert({ id: authData.user.id, email: form.email, nome: form.nome, role: form.role });
+      load();
+    }
+    setSaving(false); setModal(false);
+  };
+
+  const updateRole = async (id, role) => {
+    await supabase.from('profiles').update({ role }).eq('id', id);
+    load();
+  };
+
+  return (
+    <div>
+      <PageHeader title="Utilizadores" sub="Gere os acessos à aplicação"
+        action={<Btn onClick={openNew} icon="plus">Convidar</Btn>}/>
+
+      <div style={{padding:"1rem",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"12px",marginBottom:"1.5rem",color:"#fbbf24",fontSize:"0.82rem",lineHeight:1.7}}>
+        💡 Para adicionar um novo utilizador: vai ao <strong>Supabase → Authentication → Users → Invite user</strong>. Após o utilizador aceitar o convite, aparece aqui para definires o papel (Admin ou Operador).
+      </div>
+
+      <Card>
+        {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
+          <Table headers={["Nome","Email","Papel","Ações"]}>
+            {profiles.map(p=>(
+              <TR key={p.id}>
+                <TD bold>{p.nome||"—"}</TD>
+                <TD muted>{p.email}</TD>
+                <TD>
+                  <select value={p.role||"operador"} onChange={e=>updateRole(p.id,e.target.value)}
+                    style={{background:p.role==="admin"?"rgba(245,158,11,0.1)":"rgba(59,130,246,0.1)",border:`1px solid ${p.role==="admin"?"rgba(245,158,11,0.3)":"rgba(59,130,246,0.3)"}`,borderRadius:"8px",color:p.role==="admin"?"#fbbf24":"#60a5fa",padding:"3px 8px",fontSize:"0.75rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+                    <option value="admin">Admin</option>
+                    <option value="operador">Operador</option>
+                  </select>
+                </TD>
+                <TD><span style={{color:p.id===currentUser?.id?"#475569":"transparent",fontSize:"0.72rem"}}>{p.id===currentUser?.id?"(tu)":""}</span></TD>
+              </TR>
+            ))}
+          </Table>
+        )}
+        {!loading&&profiles.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhum utilizador encontrado. Convida utilizadores pelo Supabase.</div>}
+      </Card>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN — TURNOS
+// ════════════════════════════════════════════════════════════════════════════
+function TurnosAdmin() {
+  const [shifts, setShifts]     = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [detail, setDetail]     = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [dateFilter, setDateFilter] = useState("");
+
+  useEffect(() => { load(); }, []);
+
+  const load = async () => {
+    const q = supabase.from('shifts').select('*').order('data', {ascending:false}).order('aberto_em',{ascending:false});
+    const { data } = await q;
+    setShifts(data||[]);
+    setLoading(false);
+  };
+
+  const loadDetail = async (shift) => {
+    setSelected(shift);
+    const [{ data: ce }, { data: so }, { data: hr }] = await Promise.all([
+      supabase.from('cash_entries').select('*').eq('turno_id', shift.id).order('created_at'),
+      supabase.from('shift_orders').select('*').eq('turno_id', shift.id).order('created_at'),
+      supabase.from('hose_readings').select('*, hoses(nome,combustivel,cor)').eq('turno_id', shift.id),
+    ]);
+    setDetail({ cashEntries: ce||[], shiftOrders: so||[], hoseReadings: hr||[] });
+  };
+
+  const METODOS = ["Cash","e-Mola","M-Pesa","POS BIM","POS STB","POS Moza","POS BCI"];
+  const METODO_COLORS = {"Cash":"#f59e0b","e-Mola":"#10b981","M-Pesa":"#3b82f6","POS BIM":"#8b5cf6","POS STB":"#06b6d4","POS Moza":"#f43f5e","POS BCI":"#f97316"};
+
+  const filtered = dateFilter ? shifts.filter(s=>s.data===dateFilter) : shifts;
+
+  return (
+    <div>
+      <PageHeader title="Turnos" sub="Registo diário dos operadores"/>
+
+      <div style={{display:"flex",gap:"0.8rem",marginBottom:"1.2rem",alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"0.6rem",background:C.bg,border:C.border,borderRadius:"10px",padding:"0.5rem 0.9rem"}}>
+          <Icon name="search" size={14}/>
+          <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
+            style={{background:"none",border:"none",outline:"none",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit"}}/>
+        </div>
+        {dateFilter&&<button onClick={()=>setDateFilter("")} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:"0.8rem"}}>✕ Limpar</button>}
+      </div>
+
+      {selected && detail ? (
+        <div>
+          <button onClick={()=>{setSelected(null);setDetail(null);}} style={{background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"8px",color:"#f59e0b",cursor:"pointer",display:"flex",alignItems:"center",gap:"6px",marginBottom:"1.5rem",fontSize:"0.8rem",fontWeight:600,padding:"0.4rem 0.9rem"}}>
+            <Icon name="collapse" size={14}/> Voltar aos Turnos
+          </button>
+
+          {/* Header */}
+          <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.4rem",marginBottom:"1.2rem"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1rem"}}>
+              <div>
+                <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.95rem"}}>{selected.operador_nome}</div>
+                <div style={{color:"#475569",fontSize:"0.78rem",marginTop:"2px"}}>{fmtDate(selected.data)} · Aberto: {selected.aberto_em?new Date(selected.aberto_em).toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+              </div>
+              <Badge status={selected.status==="aberto"?"pendente":"pago"}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.6rem"}}>
+              {[
+                {l:"Entradas",v:fmt(detail.cashEntries.filter(e=>e.tipo==="entrada").reduce((s,e)=>s+e.valor,0)),c:"#34d399"},
+                {l:"Saídas",  v:fmt(detail.cashEntries.filter(e=>e.tipo==="saida").reduce((s,e)=>s+e.valor,0)),  c:"#f87171"},
+                {l:"Pedidos", v:detail.shiftOrders.length,c:"#60a5fa"},
+              ].map(({l,v,c})=>(
+                <div key={l} style={{textAlign:"center",padding:"0.7rem",background:"rgba(0,0,0,0.25)",borderRadius:"10px"}}>
+                  <div style={{color:"#334155",fontSize:"0.65rem",textTransform:"uppercase",letterSpacing:"0.08em"}}>{l}</div>
+                  <div style={{color:c,fontSize:"1rem",fontWeight:700,marginTop:"3px"}}>{v}{l!=="Pedidos"?" MT":""}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Contadores */}
+          {detail.hoseReadings.length>0&&(
+            <Card style={{marginBottom:"1.2rem"}}>
+              <CardHeader title="Contadores / Mangueiras"/>
+              <div style={{padding:"1rem 1.2rem"}}>
+                {detail.hoseReadings.map(r=>{
+                  const litros = r.leitura_final!=null ? Math.max(0,r.leitura_final-r.leitura_inicial) : null;
+                  return (
+                    <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0",borderBottom:C.borderFaint}}>
+                      <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                        <div style={{width:"8px",height:"8px",borderRadius:"50%",background:r.hoses?.cor||"#f59e0b"}}/>
+                        <span style={{color:"#e2e8f0",fontSize:"0.84rem"}}>{r.hoses?.nome} <span style={{color:"#334155"}}>({r.hoses?.combustivel})</span></span>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{color:"#475569",fontSize:"0.72rem"}}>{fmt(r.leitura_inicial)} → {r.leitura_final!=null?fmt(r.leitura_final):"—"} L</div>
+                        {litros!=null&&<div style={{color:"#fbbf24",fontWeight:600,fontSize:"0.82rem"}}>⛽ {fmt(litros)} L</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* Entradas por método */}
+          {detail.cashEntries.length>0&&(
+            <Card style={{marginBottom:"1.2rem"}}>
+              <CardHeader title="Movimentos de Caixa"/>
+              <div style={{padding:"1rem 1.2rem"}}>
+                {METODOS.map(m=>{
+                  const ent = detail.cashEntries.filter(e=>e.tipo==="entrada"&&e.metodo===m).reduce((s,e)=>s+e.valor,0);
+                  if (!ent) return null;
+                  return (
+                    <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.55rem 0",borderBottom:C.borderFaint}}>
+                      <span style={{color:METODO_COLORS[m],fontWeight:600,fontSize:"0.83rem"}}>{m}</span>
+                      <span style={{color:"#e2e8f0",fontWeight:600,fontSize:"0.85rem"}}>{fmt(ent)} MT</span>
+                    </div>
+                  );
+                })}
+                {detail.cashEntries.filter(e=>e.tipo==="saida").length>0&&(
+                  <div style={{marginTop:"0.8rem",paddingTop:"0.8rem",borderTop:C.borderFaint}}>
+                    <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"0.5rem"}}>Saídas</div>
+                    {detail.cashEntries.filter(e=>e.tipo==="saida").map(e=>(
+                      <div key={e.id} style={{display:"flex",justifyContent:"space-between",padding:"0.4rem 0",borderBottom:C.borderFaint}}>
+                        <span style={{color:"#94a3b8",fontSize:"0.82rem"}}>{e.metodo}{e.notas&&` · ${e.notas}`}</span>
+                        <span style={{color:"#f87171",fontWeight:600,fontSize:"0.82rem"}}>-{fmt(e.valor)} MT</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* Pedidos */}
+          {detail.shiftOrders.length>0&&(
+            <Card>
+              <CardHeader title={`Pedidos (${detail.shiftOrders.length})`}/>
+              <div style={{padding:"1rem 1.2rem",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"0.8rem"}}>
+                {detail.shiftOrders.map(o=>(
+                  <div key={o.id} style={{background:"rgba(0,0,0,0.25)",borderRadius:"10px",overflow:"hidden",border:C.borderFaint}}>
+                    {o.foto_url&&<img src={o.foto_url} alt="pedido" style={{width:"100%",height:"130px",objectFit:"cover",cursor:"pointer"}} onClick={()=>window.open(o.foto_url,'_blank')}/>}
+                    {o.notas&&<div style={{padding:"0.6rem 0.7rem",color:"#94a3b8",fontSize:"0.78rem"}}>{o.notas}</div>}
+                    {o.foto_url&&<div style={{padding:"0 0.7rem 0.6rem"}}>
+                      <a href={o.foto_url} download target="_blank" rel="noreferrer" style={{color:"#60a5fa",fontSize:"0.72rem",textDecoration:"none",fontWeight:600}}>⬇ Descarregar foto</a>
+                    </div>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+      ) : (
+        <Card>
+          {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
+            <Table headers={["Data","Operador","Estado","Entradas","Saídas","Pedidos",""]}>
+              {filtered.map(s=>{
+                const isOpen = s.status==="aberto";
+                return (
+                  <TR key={s.id}>
+                    <TD muted>{fmtDate(s.data)}</TD>
+                    <TD bold>{s.operador_nome||"—"}</TD>
+                    <TD><span style={{padding:"3px 9px",borderRadius:"999px",fontSize:"0.68rem",fontWeight:700,background:isOpen?"rgba(245,158,11,0.1)":"rgba(52,211,153,0.1)",color:isOpen?"#fbbf24":"#34d399",border:`1px solid ${isOpen?"rgba(245,158,11,0.2)":"rgba(52,211,153,0.2)"}`}}>{isOpen?"Aberto":"Fechado"}</span></TD>
+                    <TD right style={{color:"#34d399"}}>{s.total_entradas?`${fmt(s.total_entradas)} MT`:"—"}</TD>
+                    <TD right style={{color:"#f87171"}}>{s.total_saidas?`${fmt(s.total_saidas)} MT`:"—"}</TD>
+                    <TD right muted>—</TD>
+                    <TD><Btn small onClick={()=>loadDetail(s)} variant="ghost" icon="arrow">Ver</Btn></TD>
+                  </TR>
+                );
+              })}
+            </Table>
+          )}
+          {!loading&&filtered.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhum turno encontrado</div>}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN APP — com Auth + Supabase
+// ════════════════════════════════════════════════════════════════════════════
 export default function App() {
+  const [user, setUser]         = useState(null);
+  const [profile, setProfile]   = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [view, setView]                 = useState("dashboard");
   const [clients, setClients]           = useState([]);
   const [products, setProducts]         = useState([]);
@@ -2278,11 +3114,27 @@ export default function App() {
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState(null);
 
-  // ── Carregar dados do Supabase ─────────────────────────────────────────
   useEffect(() => {
-    loadAll();
     setupFonts();
+    // Check auth state
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) { setUser(session.user); loadProfile(session.user.id); }
+      else setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) { setUser(session.user); loadProfile(session.user.id); }
+      else { setUser(null); setProfile(null); setAuthLoading(false); }
+    });
+    return () => subscription.unsubscribe();
   }, []);
+
+  const loadProfile = async (userId) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    setProfile(data || { role:'admin' });
+    setAuthLoading(false);
+  };
+
+  const handleLogout = async () => { await supabase.auth.signOut(); setUser(null); setProfile(null); };
 
   const setupFonts = () => {
     const l1=document.createElement("link");l1.rel="preconnect";l1.href="https://fonts.googleapis.com";document.head.appendChild(l1);
@@ -2309,123 +3161,60 @@ export default function App() {
       .modal-box{animation:slideUp 0.22s cubic-bezier(.34,1.56,.64,1)}
       @keyframes fadeIn{from{opacity:0}to{opacity:1}}
       @keyframes slideUp{from{opacity:0;transform:translateY(16px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
-      .icon-btn:hover{opacity:1!important;filter:brightness(1.2)}
     `;
     document.head.appendChild(style);
   };
 
+  // ── Loading auth ──────────────────────────────────────────────────────
+  if (authLoading) return (
+    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1.5rem",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"48px",height:"48px",borderRadius:"14px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(245,158,11,0.35)"}}>
+        <Icon name="fuel" size={24}/>
+      </div>
+      <div style={{color:"#334155",fontSize:"0.8rem"}}>A verificar sessão...</div>
+    </div>
+  );
+
+  // ── Não autenticado → Login ───────────────────────────────────────────
+  if (!user) return <LoginScreen onLogin={() => supabase.auth.getSession().then(({data:{session}})=>{if(session?.user){setUser(session.user);loadProfile(session.user.id);}})} />;
+
+  // ── Operador → Módulo de turno ────────────────────────────────────────
+  if (profile?.role === 'operador') return <OperatorApp user={user} profile={profile} onLogout={handleLogout}/>;
+
+  // ── Admin → App completo ──────────────────────────────────────────────
+  useEffect(() => { loadAll(); }, [user]);
+
   const loadAll = async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      const [
-        { data: cls,  error: e1 },
-        { data: prds, error: e2 },
-        { data: ords, error: e3 },
-        { data: pays, error: e4 },
-        { data: hist, error: e5 },
-        { data: invs, error: e6 },
-      ] = await Promise.all([
+      const [ {data:cls,error:e1},{data:prds,error:e2},{data:ords,error:e3},{data:pays,error:e4},{data:hist,error:e5},{data:invs,error:e6} ] = await Promise.all([
         supabase.from('clients').select('*').order('nome'),
         supabase.from('products').select('*').order('nome'),
-        supabase.from('orders').select('*').order('data', { ascending: false }),
-        supabase.from('payments').select('*').order('data', { ascending: false }),
-        supabase.from('price_history').select('*').order('data', { ascending: false }),
-        supabase.from('invoices').select('*').order('emitida_em', { ascending: false }),
+        supabase.from('orders').select('*').order('data',{ascending:false}),
+        supabase.from('payments').select('*').order('data',{ascending:false}),
+        supabase.from('price_history').select('*').order('data',{ascending:false}),
+        supabase.from('invoices').select('*').order('emitida_em',{ascending:false}),
       ]);
-      const err = e1||e2||e3||e4||e5||e6;
-      if (err) throw err;
-      setClients(cls||[]);
-      setProducts(prds||[]);
-      setOrders(ords||[]);
-      setPayments(pays||[]);
-      setPriceHistory(hist||[]);
-      setInvoices(invs||[]);
-    } catch (err) {
-      console.error('Erro ao carregar dados:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+      if (e1||e2||e3||e4||e5||e6) throw (e1||e2||e3||e4||e5||e6);
+      setClients(cls||[]); setProducts(prds||[]); setOrders(ords||[]); setPayments(pays||[]); setPriceHistory(hist||[]); setInvoices(invs||[]);
+    } catch(err) { setError(err.message); }
+    finally { setLoading(false); }
   };
 
-  // ── CRUD — Clientes ────────────────────────────────────────────────────
-  const saveClient = async (c) => {
-    const { id, ...data } = c;
-    if (clients.some(x => x.id === id)) {
-      const { data: updated } = await supabase.from('clients').update(data).eq('id', id).select().single();
-      if (updated) setClients(cs => cs.map(x => x.id === id ? updated : x));
-    } else {
-      const { data: created } = await supabase.from('clients').insert(data).select().single();
-      if (created) setClients(cs => [...cs, created]);
-    }
-  };
-  const delClient = async (id) => {
-    await supabase.from('clients').delete().eq('id', id);
-    setClients(cs => cs.filter(x => x.id !== id));
-  };
+  const saveClient  = async (c) => { const {id,...d}=c; if(clients.some(x=>x.id===id)){const{data:u}=await supabase.from('clients').update(d).eq('id',id).select().single();if(u)setClients(cs=>cs.map(x=>x.id===id?u:x));}else{const{data:cr}=await supabase.from('clients').insert(d).select().single();if(cr)setClients(cs=>[...cs,cr]);} };
+  const delClient   = async (id) => { await supabase.from('clients').delete().eq('id',id); setClients(cs=>cs.filter(x=>x.id!==id)); };
+  const saveProduct = async (p) => { const {id,...d}=p; if(products.some(x=>x.id===id)){const{data:u}=await supabase.from('products').update(d).eq('id',id).select().single();if(u)setProducts(ps=>ps.map(x=>x.id===id?u:x));}else{const{data:cr}=await supabase.from('products').insert(d).select().single();if(cr)setProducts(ps=>[...ps,cr]);} };
+  const delProduct  = async (id) => { await supabase.from('products').delete().eq('id',id); setProducts(ps=>ps.filter(x=>x.id!==id)); };
+  const addPriceH   = async (e) => { const{id,...d}=e; const{data:cr}=await supabase.from('price_history').insert(d).select().single(); if(cr)setPriceHistory(h=>[cr,...h]); };
+  const saveOrder   = async (o) => { const{id,valorPago,valorDivida,estadoPag,...d}=o; if(orders.some(x=>x.id===id)){const{data:u}=await supabase.from('orders').update(d).eq('id',id).select().single();if(u)setOrders(os=>os.map(x=>x.id===id?u:x));}else{const{data:cr}=await supabase.from('orders').insert(d).select().single();if(cr)setOrders(os=>[cr,...os]);} };
+  const delOrder    = async (id) => { await supabase.from('orders').delete().eq('id',id); setOrders(os=>os.filter(x=>x.id!==id)); };
+  const savePayment = async (p) => { const{id,...d}=p; const{data:cr}=await supabase.from('payments').insert(d).select().single(); if(cr){setPayments(ps=>[cr,...ps]);setPayPreClient(null);} };
+  const delPayment  = async (id) => { await supabase.from('payments').delete().eq('id',id); setPayments(ps=>ps.filter(x=>x.id!==id)); };
+  const saveInvoice = async (i) => { const{id,...d}=i; const{data:cr}=await supabase.from('invoices').insert(d).select().single(); if(cr)setInvoices(is=>[cr,...is]); };
+  const delInvoice  = async (id) => { await supabase.from('invoices').delete().eq('id',id); setInvoices(is=>is.filter(x=>x.id!==id)); };
 
-  // ── CRUD — Produtos ────────────────────────────────────────────────────
-  const saveProduct = async (p) => {
-    const { id, ...data } = p;
-    if (products.some(x => x.id === id)) {
-      const { data: updated } = await supabase.from('products').update(data).eq('id', id).select().single();
-      if (updated) setProducts(ps => ps.map(x => x.id === id ? updated : x));
-    } else {
-      const { data: created } = await supabase.from('products').insert(data).select().single();
-      if (created) setProducts(ps => [...ps, created]);
-    }
-  };
-  const delProduct = async (id) => {
-    await supabase.from('products').delete().eq('id', id);
-    setProducts(ps => ps.filter(x => x.id !== id));
-  };
-  const addPriceH = async (e) => {
-    const { id, ...data } = e;
-    const { data: created } = await supabase.from('price_history').insert(data).select().single();
-    if (created) setPriceHistory(h => [created, ...h]);
-  };
-
-  // ── CRUD — Pedidos ─────────────────────────────────────────────────────
-  const saveOrder = async (o) => {
-    const { id, valorPago, valorDivida, estadoPag, ...data } = o;
-    if (orders.some(x => x.id === id)) {
-      const { data: updated } = await supabase.from('orders').update(data).eq('id', id).select().single();
-      if (updated) setOrders(os => os.map(x => x.id === id ? updated : x));
-    } else {
-      const { data: created } = await supabase.from('orders').insert(data).select().single();
-      if (created) setOrders(os => [created, ...os]);
-    }
-  };
-  const delOrder = async (id) => {
-    await supabase.from('orders').delete().eq('id', id);
-    setOrders(os => os.filter(x => x.id !== id));
-  };
-
-  // ── CRUD — Pagamentos ──────────────────────────────────────────────────
-  const savePayment = async (p) => {
-    const { id, ...data } = p;
-    const { data: created } = await supabase.from('payments').insert(data).select().single();
-    if (created) { setPayments(ps => [created, ...ps]); setPayPreClient(null); }
-  };
-  const delPayment = async (id) => {
-    await supabase.from('payments').delete().eq('id', id);
-    setPayments(ps => ps.filter(x => x.id !== id));
-  };
-
-  // ── CRUD — Faturas ─────────────────────────────────────────────────────
-  const saveInvoice = async (inv) => {
-    const { id, ...data } = inv;
-    const { data: created } = await supabase.from('invoices').insert(data).select().single();
-    if (created) setInvoices(is => [created, ...is]);
-  };
-  const delInvoice = async (id) => {
-    await supabase.from('invoices').delete().eq('id', id);
-    setInvoices(is => is.filter(x => x.id !== id));
-  };
-
-  const navTo      = (v, cid) => { setPayPreClient(cid||null); setView(v); };
-  const totalDivida = clients.reduce((s,c)=>{const {saldo}=calcSaldo(c.id,orders,payments);return saldo<0?s+Math.abs(saldo):s;},0);
+  const navTo       = (v, cid) => { setPayPreClient(cid||null); setView(v); };
+  const totalDivida = clients.reduce((s,c)=>{const{saldo}=calcSaldo(c.id,orders,payments);return saldo<0?s+Math.abs(saldo):s;},0);
 
   const navItems = [
     {id:"dashboard",label:"Dashboard",         icon:"dashboard"},
@@ -2434,42 +3223,27 @@ export default function App() {
     {id:"faturas",  label:"Faturas",           icon:"file"},
     {id:"products", label:"Produtos & Preços", icon:"products"},
     {id:"orders",   label:"Pedidos",           icon:"orders"},
+    {id:"turnos",   label:"Turnos",            icon:"history"},
+    {id:"mangueiras",label:"Mangueiras",       icon:"fuel"},
+    {id:"users",    label:"Utilizadores",      icon:"clients"},
     {id:"reports",  label:"Relatórios",        icon:"reports"},
   ];
 
-  // ── Loading screen ─────────────────────────────────────────────────────
   if (loading) return (
     <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1.5rem",fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{width:"48px",height:"48px",borderRadius:"14px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(245,158,11,0.35)"}}>
-        <Icon name="fuel" size={24}/>
-      </div>
-      <div style={{textAlign:"center"}}>
-        <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.4rem",letterSpacing:"-0.02em"}}>FuelFlow</div>
-        <div style={{color:"#334155",fontSize:"0.8rem",marginTop:"0.5rem"}}>A carregar dados...</div>
-      </div>
-      <div style={{width:"160px",height:"3px",background:"rgba(255,255,255,0.05)",borderRadius:"99px",overflow:"hidden"}}>
-        <div style={{height:"100%",width:"40%",background:"linear-gradient(90deg,#f59e0b,#d97706)",borderRadius:"99px",animation:"loading 1.2s ease-in-out infinite"}}/>
-      </div>
+      <div style={{width:"48px",height:"48px",borderRadius:"14px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(245,158,11,0.35)"}}><Icon name="fuel" size={24}/></div>
+      <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.4rem",letterSpacing:"-0.02em"}}>FuelFlow</div>
+      <div style={{width:"160px",height:"3px",background:"rgba(255,255,255,0.05)",borderRadius:"99px",overflow:"hidden"}}><div style={{height:"100%",width:"40%",background:"linear-gradient(90deg,#f59e0b,#d97706)",borderRadius:"99px",animation:"loading 1.2s ease-in-out infinite"}}/></div>
       <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
     </div>
   );
 
-  // ── Error screen ───────────────────────────────────────────────────────
   if (error) return (
     <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1rem",fontFamily:"'DM Sans',sans-serif",padding:"2rem"}}>
       <div style={{color:"#f87171",fontSize:"2rem"}}>⚠</div>
-      <div style={{color:"#f1f5f9",fontWeight:600,fontSize:"1rem"}}>Erro ao ligar ao Supabase</div>
-      <div style={{color:"#475569",fontSize:"0.82rem",maxWidth:"400px",textAlign:"center"}}>{error}</div>
-      <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",padding:"1rem 1.2rem",maxWidth:"400px",width:"100%"}}>
-        <div style={{color:"#fca5a5",fontSize:"0.78rem",lineHeight:1.7}}>
-          Verifica se o ficheiro <code>.env</code> tem as variáveis corretas:<br/>
-          <code>VITE_SUPABASE_URL</code><br/>
-          <code>VITE_SUPABASE_ANON_KEY</code>
-        </div>
-      </div>
-      <button onClick={loadAll} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"10px",padding:"0.6rem 1.4rem",cursor:"pointer",fontWeight:700,fontSize:"0.85rem"}}>
-        Tentar novamente
-      </button>
+      <div style={{color:"#f1f5f9",fontWeight:600}}>Erro ao ligar ao Supabase</div>
+      <div style={{color:"#475569",fontSize:"0.82rem"}}>{error}</div>
+      <button onClick={loadAll} style={{background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"10px",padding:"0.6rem 1.4rem",cursor:"pointer",fontWeight:700}}>Tentar novamente</button>
     </div>
   );
 
@@ -2478,26 +3252,19 @@ export default function App() {
       <aside style={{width:sideOpen?"240px":"64px",minHeight:"100vh",background:"#080f1c",borderRight:"1px solid rgba(255,255,255,0.04)",display:"flex",flexDirection:"column",flexShrink:0,transition:"width 0.28s cubic-bezier(.4,0,.2,1)",overflow:"visible",position:"relative"}}>
         <div style={{position:"absolute",top:0,left:0,width:"2px",height:"100%",background:"linear-gradient(180deg,#f59e0b40 0%,transparent 60%)",zIndex:0}}/>
 
-        {/* ── Seta flutuante de colapso ── */}
-        <button
-          onClick={()=>setSideOpen(s=>!s)}
-          title={sideOpen?"Esconder menu":"Mostrar menu"}
-          style={{
-            position:"absolute", top:"50%", right:"-14px", transform:"translateY(-50%)",
-            width:"28px", height:"28px", borderRadius:"50%",
-            background:"#0f1e30", border:"1px solid rgba(255,255,255,0.1)",
-            color:"#475569", cursor:"pointer", display:"flex", alignItems:"center",
-            justifyContent:"center", zIndex:50, boxShadow:"0 2px 8px rgba(0,0,0,0.4)",
-            transition:"all 0.2s",
-          }}
+        {/* Seta flutuante */}
+        <button onClick={()=>setSideOpen(s=>!s)} title={sideOpen?"Esconder":"Mostrar"}
+          style={{position:"absolute",top:"50%",right:"-14px",transform:"translateY(-50%)",width:"28px",height:"28px",borderRadius:"50%",background:"#0f1e30",border:"1px solid rgba(255,255,255,0.1)",color:"#475569",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:50,boxShadow:"0 2px 8px rgba(0,0,0,0.4)",transition:"all 0.2s"}}
           onMouseEnter={e=>{e.currentTarget.style.background="#1e3a5f";e.currentTarget.style.color="#f59e0b";e.currentTarget.style.borderColor="rgba(245,158,11,0.3)";}}
-          onMouseLeave={e=>{e.currentTarget.style.background="#0f1e30";e.currentTarget.style.color="#475569";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";}}
-        >
+          onMouseLeave={e=>{e.currentTarget.style.background="#0f1e30";e.currentTarget.style.color="#475569";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";}}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
             style={{transform:sideOpen?"rotate(0deg)":"rotate(180deg)",transition:"transform 0.28s cubic-bezier(.4,0,.2,1)"}}>
             <path d="M15 18l-6-6 6-6"/>
           </svg>
-        </button>        <div style={{padding:"1.3rem 1rem 1.1rem",borderBottom:"1px solid rgba(255,255,255,0.04)",display:"flex",alignItems:"center",gap:"10px",minHeight:"64px"}}>
+        </button>
+
+        {/* Logo */}
+        <div style={{padding:"1.3rem 1rem 1.1rem",borderBottom:"1px solid rgba(255,255,255,0.04)",display:"flex",alignItems:"center",gap:"10px",minHeight:"64px"}}>
           <div style={{width:"34px",height:"34px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 4px 12px rgba(245,158,11,0.3)"}}>
             <Icon name="fuel" size={16}/>
           </div>
@@ -2506,7 +3273,9 @@ export default function App() {
             <div style={{color:"#334155",fontSize:"0.6rem",textTransform:"uppercase",letterSpacing:"0.12em",marginTop:"1px"}}>Gestão · Moçambique</div>
           </div>}
         </div>
-        <nav style={{padding:"0.8rem 0.5rem",flex:1,display:"flex",flexDirection:"column",gap:"2px"}}>
+
+        {/* Nav */}
+        <nav style={{padding:"0.8rem 0.5rem",flex:1,display:"flex",flexDirection:"column",gap:"2px",overflowY:"auto"}}>
           {navItems.map(item=>{
             const active=view===item.id;
             const showBadge=item.id==="payments"&&totalDivida>0.01;
@@ -2517,23 +3286,38 @@ export default function App() {
                 <span style={{flexShrink:0,opacity:active?1:0.7}}><Icon name={item.icon} size={17}/></span>
                 {sideOpen&&<span style={{fontSize:"0.82rem",fontWeight:active?600:400,letterSpacing:active?"-0.01em":0}}>{item.label}</span>}
                 {active&&<div style={{position:"absolute",left:0,top:"20%",bottom:"20%",width:"2px",borderRadius:"2px",background:"#f59e0b"}}/>}
-                {showBadge&&<div style={{marginLeft:"auto",background:"#ef4444",color:"#fff",borderRadius:"999px",fontSize:"0.58rem",fontWeight:700,padding:"1px 7px",minWidth:"18px",textAlign:"center",letterSpacing:"0.02em"}}>
+                {showBadge&&<div style={{marginLeft:"auto",background:"#ef4444",color:"#fff",borderRadius:"999px",fontSize:"0.58rem",fontWeight:700,padding:"1px 7px",minWidth:"18px",textAlign:"center"}}>
                   {sideOpen?`${fmt(totalDivida).split(",")[0]} MT`:"!"}
                 </div>}
               </button>
             );
           })}
         </nav>
+
+        {/* User + Logout */}
+        <div style={{padding:"0.7rem 0.5rem",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+          {sideOpen&&<div style={{padding:"0.5rem 0.75rem",marginBottom:"4px"}}>
+            <div style={{color:"#475569",fontSize:"0.7rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{profile?.nome||user?.email}</div>
+            <div style={{color:"#2d4a6b",fontSize:"0.62rem",textTransform:"uppercase",letterSpacing:"0.08em"}}>Admin</div>
+          </div>}
+          <button onClick={handleLogout} title="Sair" style={{width:"100%",display:"flex",alignItems:"center",gap:"9px",padding:"0.55rem 0.75rem",borderRadius:"10px",border:"none",background:"transparent",color:"#334155",cursor:"pointer",whiteSpace:"nowrap"}}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            {sideOpen&&<span style={{fontSize:"0.78rem"}}>Sair</span>}
+          </button>
+        </div>
       </aside>
 
       <main style={{flex:1,padding:"2rem 2.2rem",overflowX:"auto",minWidth:0,background:"#060d18"}}>
-        {view==="dashboard"&&<Dashboard orders={orders} clients={clients} products={products} payments={payments} onNavTo={navTo}/>}
-        {view==="clients"  &&<Clients   clients={clients} orders={orders} payments={payments} onSave={saveClient} onDelete={delClient} onNavTo={navTo}/>}
-        {view==="payments" &&<Payments  payments={payments} clients={clients} orders={orders} invoices={invoices} onSave={savePayment} onDelete={delPayment} preSelectedClient={payPreClient}/>}
-        {view==="products" &&<Products  products={products} onSave={saveProduct} onDelete={delProduct} priceHistory={priceHistory} onPriceChange={addPriceH}/>}
-        {view==="orders"   &&<Orders    orders={orders} clients={clients} products={products} payments={payments} onSave={saveOrder} onDelete={delOrder}/>}
-        {view==="reports"  &&<Reports   orders={orders} clients={clients} products={products} payments={payments}/>}
-        {view==="faturas"  &&<Faturas   clients={clients} orders={orders} products={products} payments={payments} invoices={invoices} onSave={saveInvoice} onDelete={delInvoice}/>}
+        {view==="dashboard"  &&<Dashboard    orders={orders} clients={clients} products={products} payments={payments} onNavTo={navTo}/>}
+        {view==="clients"    &&<Clients      clients={clients} orders={orders} payments={payments} onSave={saveClient} onDelete={delClient} onNavTo={navTo}/>}
+        {view==="payments"   &&<Payments     payments={payments} clients={clients} orders={orders} invoices={invoices} onSave={savePayment} onDelete={delPayment} preSelectedClient={payPreClient}/>}
+        {view==="products"   &&<Products     products={products} onSave={saveProduct} onDelete={delProduct} priceHistory={priceHistory} onPriceChange={addPriceH}/>}
+        {view==="orders"     &&<Orders       orders={orders} clients={clients} products={products} payments={payments} onSave={saveOrder} onDelete={delOrder}/>}
+        {view==="reports"    &&<Reports      orders={orders} clients={clients} products={products} payments={payments}/>}
+        {view==="faturas"    &&<Faturas      clients={clients} orders={orders} products={products} payments={payments} invoices={invoices} onSave={saveInvoice} onDelete={delInvoice}/>}
+        {view==="turnos"     &&<TurnosAdmin/>}
+        {view==="mangueiras" &&<HosesAdmin/>}
+        {view==="users"      &&<UsersAdmin   currentUser={user}/>}
       </main>
     </div>
   );
