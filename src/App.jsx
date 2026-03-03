@@ -3150,7 +3150,18 @@ export default function App() {
 
   const loadProfile = async (userId) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    setProfile(data || { role:'admin' });
+    if (data) {
+      setProfile(data);
+    } else {
+      // Perfil não existe ainda — cria como operador por defeito
+      const { data: newProfile } = await supabase.from('profiles').insert({
+        id: userId,
+        email: (await supabase.auth.getUser()).data?.user?.email || '',
+        nome: '',
+        role: 'operador',
+      }).select().single();
+      setProfile(newProfile || { role: 'operador' });
+    }
     setAuthLoading(false);
   };
 
@@ -3197,6 +3208,16 @@ export default function App() {
 
   // ── Não autenticado → Login ───────────────────────────────────────────
   if (!user) return <LoginScreen onLogin={() => supabase.auth.getSession().then(({data:{session}})=>{if(session?.user){setUser(session.user);loadProfile(session.user.id);}})} />;
+
+  // ── Aguardar perfil carregar ──────────────────────────────────────────
+  if (!profile) return (
+    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1rem",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"48px",height:"48px",borderRadius:"14px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(245,158,11,0.35)"}}>
+        <Icon name="fuel" size={24}/>
+      </div>
+      <div style={{color:"#334155",fontSize:"0.8rem"}}>A carregar perfil...</div>
+    </div>
+  );
 
   // ── Operador → Módulo de turno ────────────────────────────────────────
   if (profile?.role === 'operador') return <OperatorApp user={user} profile={profile} onLogout={handleLogout}/>;
