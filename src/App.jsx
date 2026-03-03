@@ -2413,7 +2413,7 @@ function OperatorApp({ user, profile, onLogout }) {
     const { data: shiftData } = await supabase
       .from('shifts')
       .select('*')
-      .eq('operador_id', user.id)
+      .eq('operador_account_id', user.id)
       .eq('data', today)
       .eq('status', 'aberto')
       .single();
@@ -2444,15 +2444,16 @@ function OperatorApp({ user, profile, onLogout }) {
   const openShift = async () => {
     setStartingShift(true);
     const today = new Date().toISOString().split("T")[0];
-    const { data: newShift } = await supabase.from('shifts').insert({
-      operador_id: user.id,
-      operador_nome: profile?.nome || user.email,
+    const { data: newShift, error: shiftErr } = await supabase.from('shifts').insert({
+      operador_id: null,
+      operador_account_id: user.id,
+      operador_nome: profile?.nome || user.username || user.nome,
       data: today,
       status: 'aberto',
       aberto_em: new Date().toISOString(),
     }).select().single();
+    if (shiftErr) { console.error(shiftErr); alert("Erro ao iniciar turno: " + shiftErr.message); setStartingShift(false); return; }
     if (newShift) {
-      // Save initial readings
       for (const [hoseId, leitura] of Object.entries(startReadings)) {
         if (leitura) {
           await supabase.from('hose_readings').insert({
