@@ -2260,9 +2260,18 @@ function Faturas({ clients, orders, products, payments, invoices, onSave, onDele
 // ════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════════════
-// LOGIN SCREEN
+// LOGIN SCREEN — Admin (email) ou Operador (username)
 // ════════════════════════════════════════════════════════════════════════════
-function LoginScreen({ onLogin }) {
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + "fuelflow_salt_2024");
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+function LoginScreen({ onAdminLogin, onOperatorLogin }) {
+  const [mode, setMode]         = useState("operador"); // operador | admin
+  const [username, setUsername] = useState("");
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
@@ -2276,22 +2285,42 @@ function LoginScreen({ onLogin }) {
     document.head.appendChild(style);
   }, []);
 
-  const handleLogin = async (e) => {
+  const handleOperatorLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError("");
+    try {
+      const hash = await hashPassword(password);
+      const { data, error: err } = await supabase
+        .from('operator_accounts')
+        .select('*')
+        .eq('username', username.trim().toLowerCase())
+        .eq('password_hash', hash)
+        .eq('activo', true)
+        .single();
+      if (err || !data) { setError("Utilizador ou senha incorrectos."); setLoading(false); return; }
+      onOperatorLogin(data);
+    } catch { setError("Erro ao verificar credenciais."); }
+    setLoading(false);
+  };
+
+  const handleAdminLogin = async (e) => {
     e.preventDefault();
     setLoading(true); setError("");
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) { setError("Email ou senha incorrectos."); setLoading(false); }
-    else onLogin();
+    else onAdminLogin();
   };
+
+  const inputStyle = {width:"100%",padding:"0.7rem 1rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",transition:"all 0.15s"};
+  const labelStyle = {display:"block",color:"#475569",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"7px"};
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-      {/* Background glow */}
       <div style={{position:"fixed",top:"-20%",left:"50%",transform:"translateX(-50%)",width:"600px",height:"600px",background:"radial-gradient(circle,rgba(245,158,11,0.06) 0%,transparent 70%)",pointerEvents:"none"}}/>
 
       <div style={{width:"100%",maxWidth:"400px"}}>
         {/* Logo */}
-        <div style={{textAlign:"center",marginBottom:"2.5rem"}}>
+        <div style={{textAlign:"center",marginBottom:"2rem"}}>
           <div style={{width:"56px",height:"56px",borderRadius:"16px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1rem",boxShadow:"0 8px 24px rgba(245,158,11,0.3)"}}>
             <Icon name="fuel" size={26}/>
           </div>
@@ -2299,33 +2328,49 @@ function LoginScreen({ onLogin }) {
           <div style={{color:"#334155",fontSize:"0.78rem",marginTop:"4px",textTransform:"uppercase",letterSpacing:"0.12em"}}>Gestão de Combustíveis</div>
         </div>
 
+        {/* Mode toggle */}
+        <div style={{display:"flex",gap:"4px",marginBottom:"1.5rem",background:"rgba(255,255,255,0.03)",padding:"4px",borderRadius:"12px"}}>
+          {[["operador","⛽ Operador"],["admin","⚙️ Admin"]].map(([m,l])=>(
+            <button key={m} onClick={()=>{setMode(m);setError("");}} style={{flex:1,padding:"0.6rem",borderRadius:"9px",border:"none",background:mode===m?"linear-gradient(135deg,#f59e0b,#d97706)":"transparent",color:mode===m?"#000":"#475569",fontWeight:mode===m?700:400,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+
         {/* Card */}
         <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"20px",padding:"2rem",boxShadow:"0 24px 64px rgba(0,0,0,0.5)"}}>
-          <div style={{color:"#94a3b8",fontSize:"0.85rem",marginBottom:"1.8rem",textAlign:"center"}}>Entra na tua conta para continuar</div>
 
-          <form onSubmit={handleLogin}>
-            <div style={{marginBottom:"1rem"}}>
-              <label style={{display:"block",color:"#475569",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"7px"}}>Email</label>
-              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="o.teu@email.com"
-                style={{width:"100%",padding:"0.7rem 1rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",transition:"all 0.15s"}}/>
-            </div>
-            <div style={{marginBottom:"1.5rem"}}>
-              <label style={{display:"block",color:"#475569",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"7px"}}>Senha</label>
-              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••"
-                style={{width:"100%",padding:"0.7rem 1rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",transition:"all 0.15s"}}/>
-            </div>
-
-            {error && (
-              <div style={{padding:"0.7rem 1rem",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",color:"#f87171",fontSize:"0.82rem",marginBottom:"1rem",textAlign:"center"}}>
-                {error}
+          {mode==="operador" ? (
+            <form onSubmit={handleOperatorLogin}>
+              <div style={{marginBottom:"1rem"}}>
+                <label style={labelStyle}>Utilizador</label>
+                <input value={username} onChange={e=>setUsername(e.target.value)} required placeholder="ex: joao.silva" autoComplete="username" style={inputStyle}/>
               </div>
-            )}
-
-            <button type="submit" disabled={loading}
-              style={{width:"100%",padding:"0.75rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:loading?"wait":"pointer",opacity:loading?0.7:1,transition:"all 0.2s",boxShadow:"0 4px 16px rgba(245,158,11,0.25)",fontFamily:"inherit"}}>
-              {loading ? "A entrar..." : "Entrar"}
-            </button>
-          </form>
+              <div style={{marginBottom:"1.5rem"}}>
+                <label style={labelStyle}>Senha</label>
+                <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••" autoComplete="current-password" style={inputStyle}/>
+              </div>
+              {error&&<div style={{padding:"0.7rem 1rem",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",color:"#f87171",fontSize:"0.82rem",marginBottom:"1rem",textAlign:"center"}}>{error}</div>}
+              <button type="submit" disabled={loading} style={{width:"100%",padding:"0.75rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:loading?"wait":"pointer",opacity:loading?0.7:1,transition:"all 0.2s",boxShadow:"0 4px 16px rgba(245,158,11,0.25)",fontFamily:"inherit"}}>
+                {loading?"A entrar...":"Entrar como Operador"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleAdminLogin}>
+              <div style={{marginBottom:"1rem"}}>
+                <label style={labelStyle}>Email</label>
+                <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="admin@email.com" autoComplete="email" style={inputStyle}/>
+              </div>
+              <div style={{marginBottom:"1.5rem"}}>
+                <label style={labelStyle}>Senha</label>
+                <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••" autoComplete="current-password" style={inputStyle}/>
+              </div>
+              {error&&<div style={{padding:"0.7rem 1rem",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:"10px",color:"#f87171",fontSize:"0.82rem",marginBottom:"1rem",textAlign:"center"}}>{error}</div>}
+              <button type="submit" disabled={loading} style={{width:"100%",padding:"0.75rem",background:"linear-gradient(135deg,#475569,#334155)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:loading?"wait":"pointer",opacity:loading?0.7:1,transition:"all 0.2s",fontFamily:"inherit"}}>
+                {loading?"A entrar...":"Entrar como Admin"}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -2851,71 +2896,125 @@ function HosesAdmin() {
 // ADMIN — GESTÃO DE UTILIZADORES
 // ════════════════════════════════════════════════════════════════════════════
 function UsersAdmin({ currentUser }) {
-  const [profiles, setProfiles] = useState([]);
-  const [modal, setModal]       = useState(false);
-  const [form, setForm]         = useState({});
-  const [saving, setSaving]     = useState(false);
-  const [loading, setLoading]   = useState(true);
+  const [operators, setOperators] = useState([]);
+  const [modal, setModal]         = useState(false);
+  const [form, setForm]           = useState({});
+  const [saving, setSaving]       = useState(false);
+  const [loading, setLoading]     = useState(true);
+  const [showPass, setShowPass]   = useState({});
 
   useEffect(() => { load(); }, []);
-  const load = async () => { const { data } = await supabase.from('profiles').select('*').order('nome'); setProfiles(data||[]); setLoading(false); };
-
-  const openNew = () => { setForm({ email:"", nome:"", role:"operador", password:"" }); setModal(true); };
-
-  const handleSave = async () => {
-    if (!form.email||!form.nome||!form.password) return;
-    setSaving(true);
-    // Create user in Supabase Auth (requires service role - workaround: use signUp)
-    const { data: authData, error: authErr } = await supabase.auth.admin?.createUser?.({
-      email: form.email, password: form.password, email_confirm: true,
-    }) || { error: { message: "Usa o painel Supabase para criar utilizadores" }};
-
-    if (authErr) {
-      alert(`Para criar utilizadores:\n1. Vai ao Supabase → Authentication → Users → Invite\n2. Depois edita o perfil aqui para definir o papel (Admin/Operador)`);
-      setSaving(false); return;
-    }
-    if (authData?.user) {
-      await supabase.from('profiles').upsert({ id: authData.user.id, email: form.email, nome: form.nome, role: form.role });
-      load();
-    }
-    setSaving(false); setModal(false);
+  const load = async () => {
+    const { data } = await supabase.from('operator_accounts').select('*').order('nome');
+    setOperators(data||[]); setLoading(false);
   };
 
-  const updateRole = async (id, role) => {
-    await supabase.from('profiles').update({ role }).eq('id', id);
+  const openNew  = () => { setForm({ nome:"", username:"", password:"", activo:true }); setModal(true); };
+  const openEdit = (op) => { setForm({ ...op, password:"" }); setModal(true); };
+
+  const handleSave = async () => {
+    if (!form.nome || !form.username) return;
+    setSaving(true);
+    const username = form.username.trim().toLowerCase().replace(/\s+/g, ".");
+    // Check duplicate username
+    if (!form.id) {
+      const { data: existing } = await supabase.from('operator_accounts').select('id').eq('username', username).single();
+      if (existing) { alert(`O utilizador "${username}" já existe.`); setSaving(false); return; }
+    }
+    const payload = { nome: form.nome, username, activo: form.activo ?? true };
+    if (form.password) {
+      payload.password_hash = await hashPassword(form.password);
+    }
+    if (form.id) {
+      await supabase.from('operator_accounts').update(payload).eq('id', form.id);
+    } else {
+      if (!form.password) { alert("Define uma senha para o operador."); setSaving(false); return; }
+      await supabase.from('operator_accounts').insert(payload);
+    }
+    setSaving(false); setModal(false); load();
+  };
+
+  const toggleActive = async (op) => {
+    await supabase.from('operator_accounts').update({ activo: !op.activo }).eq('id', op.id);
+    load();
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Eliminar este operador?")) return;
+    await supabase.from('operator_accounts').delete().eq('id', id);
     load();
   };
 
   return (
     <div>
-      <PageHeader title="Utilizadores" sub="Gere os acessos à aplicação"
-        action={<Btn onClick={openNew} icon="plus">Convidar</Btn>}/>
-
-      <div style={{padding:"1rem",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"12px",marginBottom:"1.5rem",color:"#fbbf24",fontSize:"0.82rem",lineHeight:1.7}}>
-        💡 Para adicionar um novo utilizador: vai ao <strong>Supabase → Authentication → Users → Invite user</strong>. Após o utilizador aceitar o convite, aparece aqui para definires o papel (Admin ou Operador).
-      </div>
+      <PageHeader title="Operadores" sub="Gere os acessos dos operadores de turno"
+        action={<Btn onClick={openNew} icon="plus">Novo Operador</Btn>}/>
 
       <Card>
         {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
-          <Table headers={["Nome","Email","Papel","Ações"]}>
-            {profiles.map(p=>(
-              <TR key={p.id}>
-                <TD bold>{p.nome||"—"}</TD>
-                <TD muted>{p.email}</TD>
+          <Table headers={["Nome","Utilizador","Estado","Ações"]}>
+            {operators.map(op=>(
+              <TR key={op.id}>
+                <TD bold>{op.nome}</TD>
+                <TD><span style={{fontFamily:"monospace",background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:"6px",color:"#94a3b8",fontSize:"0.82rem"}}>@{op.username}</span></TD>
                 <TD>
-                  <select value={p.role||"operador"} onChange={e=>updateRole(p.id,e.target.value)}
-                    style={{background:p.role==="admin"?"rgba(245,158,11,0.1)":"rgba(59,130,246,0.1)",border:`1px solid ${p.role==="admin"?"rgba(245,158,11,0.3)":"rgba(59,130,246,0.3)"}`,borderRadius:"8px",color:p.role==="admin"?"#fbbf24":"#60a5fa",padding:"3px 8px",fontSize:"0.75rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
-                    <option value="admin">Admin</option>
-                    <option value="operador">Operador</option>
-                  </select>
+                  <button onClick={()=>toggleActive(op)} style={{padding:"3px 10px",borderRadius:"999px",border:"none",cursor:"pointer",fontSize:"0.72rem",fontWeight:700,background:op.activo?"rgba(52,211,153,0.1)":"rgba(248,113,113,0.1)",color:op.activo?"#34d399":"#f87171",border:`1px solid ${op.activo?"rgba(52,211,153,0.2)":"rgba(248,113,113,0.2)"}`}}>
+                    {op.activo?"Activo":"Inactivo"}
+                  </button>
                 </TD>
-                <TD><span style={{color:p.id===currentUser?.id?"#475569":"transparent",fontSize:"0.72rem"}}>{p.id===currentUser?.id?"(tu)":""}</span></TD>
+                <TD><div style={{display:"flex",gap:"5px"}}>
+                  <IconBtn onClick={()=>openEdit(op)} icon="edit" color="#f59e0b" title="Editar"/>
+                  <IconBtn onClick={()=>handleDelete(op.id)} icon="trash" color="#f87171" title="Eliminar"/>
+                </div></TD>
               </TR>
             ))}
           </Table>
         )}
-        {!loading&&profiles.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhum utilizador encontrado. Convida utilizadores pelo Supabase.</div>}
+        {!loading&&operators.length===0&&(
+          <div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>
+            Nenhum operador criado ainda.<br/>
+            <span style={{fontSize:"0.8rem"}}>Clica em "Novo Operador" para adicionar.</span>
+          </div>
+        )}
       </Card>
+
+      {modal&&(
+        <Modal title={form.id?"Editar Operador":"Novo Operador"} onClose={()=>setModal(false)}>
+          <Field label="Nome completo *">
+            <Input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="ex: João Silva"/>
+          </Field>
+          <Field label="Utilizador (username) *">
+            <div style={{position:"relative"}}>
+              <span style={{position:"absolute",left:"0.9rem",top:"50%",transform:"translateY(-50%)",color:"#475569",fontSize:"0.88rem"}}>@</span>
+              <Input value={form.username||""} onChange={e=>setForm(f=>({...f,username:e.target.value.toLowerCase().replace(/\s+/g,".")}))}
+                placeholder="joao.silva" style={{paddingLeft:"1.8rem"}}/>
+            </div>
+            <div style={{color:"#334155",fontSize:"0.7rem",marginTop:"4px"}}>Apenas letras minúsculas, números e pontos</div>
+          </Field>
+          <Field label={form.id?"Nova Senha (deixa vazio para manter)":"Senha *"}>
+            <div style={{position:"relative"}}>
+              <Input type={showPass[form.id||"new"]?"text":"password"} value={form.password||""}
+                onChange={e=>setForm(f=>({...f,password:e.target.value}))}
+                placeholder={form.id?"••••••••":"Mínimo 4 caracteres"}/>
+              <button type="button" onClick={()=>setShowPass(s=>({...s,[form.id||"new"]:!s[form.id||"new"]}))}
+                style={{position:"absolute",right:"0.8rem",top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:"0.8rem"}}>
+                {showPass[form.id||"new"]?"🙈":"👁️"}
+              </button>
+            </div>
+          </Field>
+          <div style={{display:"flex",alignItems:"center",gap:"0.7rem",padding:"0.7rem 0"}}>
+            <button type="button" onClick={()=>setForm(f=>({...f,activo:!f.activo}))}
+              style={{width:"36px",height:"20px",borderRadius:"999px",border:"none",cursor:"pointer",background:form.activo?"#f59e0b":"#1e293b",position:"relative",transition:"background 0.2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:"2px",left:form.activo?"18px":"2px",width:"16px",height:"16px",borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+            </button>
+            <span style={{color:"#94a3b8",fontSize:"0.83rem"}}>Conta activa</span>
+          </div>
+          <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1rem"}}>
+            <Btn onClick={()=>setModal(false)} variant="secondary">Cancelar</Btn>
+            <Btn onClick={handleSave} icon="save" disabled={saving}>{saving?"A guardar...":"Guardar"}</Btn>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -3099,8 +3198,11 @@ function TurnosAdmin() {
 // MAIN APP — com Auth + Supabase
 // ════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [user, setUser]         = useState(null);
-  const [profile, setProfile]   = useState(null);
+  const [user, setUser]               = useState(null);   // Supabase auth user (admin)
+  const [profile, setProfile]         = useState(null);   // admin profile
+  const [operatorSession, setOperatorSession] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('ff_operator') || 'null'); } catch { return null; }
+  });
   const [authLoading, setAuthLoading] = useState(true);
   const [view, setView]                 = useState("dashboard");
   const [clients, setClients]           = useState([]);
@@ -3149,23 +3251,46 @@ export default function App() {
   }, [user, profile]);
 
   const loadProfile = async (userId) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (data) {
-      setProfile(data);
-    } else {
-      // Perfil não existe ainda — cria como operador por defeito
-      const { data: newProfile } = await supabase.from('profiles').insert({
-        id: userId,
-        email: (await supabase.auth.getUser()).data?.user?.email || '',
-        nome: '',
-        role: 'operador',
-      }).select().single();
-      setProfile(newProfile || { role: 'operador' });
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      if (data && !error) {
+        setProfile(data);
+      } else {
+        // Tabela não existe ou perfil não encontrado — tenta criar
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          const { data: newProfile } = await supabase.from('profiles').insert({
+            id: userId,
+            email: authUser?.email || '',
+            nome: authUser?.email?.split('@')[0] || '',
+            role: 'operador',
+          }).select().single();
+          setProfile(newProfile || { id: userId, role: 'operador' });
+        } catch {
+          // Se tabela não existe, assume operador para segurança
+          setProfile({ id: userId, role: 'operador' });
+        }
+      }
+    } catch {
+      setProfile({ id: userId, role: 'operador' });
     }
     setAuthLoading(false);
   };
 
-  const handleLogout = async () => { await supabase.auth.signOut(); setUser(null); setProfile(null); };
+  const handleLogout = async () => {
+    if (operatorSession) {
+      sessionStorage.removeItem('ff_operator');
+      setOperatorSession(null);
+    } else {
+      await supabase.auth.signOut();
+      setUser(null); setProfile(null);
+    }
+  };
+
+  const handleOperatorLogin = (opData) => {
+    sessionStorage.setItem('ff_operator', JSON.stringify(opData));
+    setOperatorSession(opData);
+  };
 
   const setupFonts = () => {
     const l1=document.createElement("link");l1.rel="preconnect";l1.href="https://fonts.googleapis.com";document.head.appendChild(l1);
@@ -3196,6 +3321,9 @@ export default function App() {
     document.head.appendChild(style);
   };
 
+  // ── Operador logado via username ──────────────────────────────────────
+  if (operatorSession) return <OperatorApp user={operatorSession} profile={operatorSession} onLogout={handleLogout}/>;
+
   // ── Loading auth ──────────────────────────────────────────────────────
   if (authLoading) return (
     <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1.5rem",fontFamily:"'DM Sans',sans-serif"}}>
@@ -3207,20 +3335,17 @@ export default function App() {
   );
 
   // ── Não autenticado → Login ───────────────────────────────────────────
-  if (!user) return <LoginScreen onLogin={() => supabase.auth.getSession().then(({data:{session}})=>{if(session?.user){setUser(session.user);loadProfile(session.user.id);}})} />;
+  if (!user) return <LoginScreen
+    onAdminLogin={()=>supabase.auth.getSession().then(({data:{session}})=>{if(session?.user){setUser(session.user);loadProfile(session.user.id);}})}
+    onOperatorLogin={handleOperatorLogin}
+  />;
 
-  // ── Aguardar perfil carregar ──────────────────────────────────────────
+  // ── Aguardar perfil ───────────────────────────────────────────────────
   if (!profile) return (
-    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"1rem",fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{width:"48px",height:"48px",borderRadius:"14px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(245,158,11,0.35)"}}>
-        <Icon name="fuel" size={24}/>
-      </div>
-      <div style={{color:"#334155",fontSize:"0.8rem"}}>A carregar perfil...</div>
+    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",color:"#334155",fontSize:"0.8rem"}}>
+      A carregar perfil...
     </div>
   );
-
-  // ── Operador → Módulo de turno ────────────────────────────────────────
-  if (profile?.role === 'operador') return <OperatorApp user={user} profile={profile} onLogout={handleLogout}/>;
 
   // ── Admin → App completo ──────────────────────────────────────────────
 
