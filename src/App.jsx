@@ -2392,7 +2392,7 @@ function OperatorApp({ user, profile, onLogout }) {
   const [saving, setSaving]           = useState(false);
   const [closingShift, setClosingShift] = useState(false);
   const [cashForm, setCashForm]       = useState({ method:"Cash", type:"entrada", valor:"", notas:"" });
-  const emptyOrderForm = () => ({ clienteId:"", reqNum:"", data:new Date().toISOString().split("T")[0], photoFile:null, photoPreview:null, itens:[{ produtoId:"", qtd:"", valorUnit:"" }] });
+  const emptyOrderForm = () => ({ clienteId:"", reqNum:"", data:new Date().toISOString().split("T")[0], photoFile:null, photoPreview:null, metodoPagamento:"Cash", itens:[{ produtoId:"", qtd:"", valorUnit:"" }] });
   const [orderForm, setOrderForm]     = useState(emptyOrderForm());
   const [finalReadings, setFinalReadings] = useState({});
   const [startReadings, setStartReadings] = useState({});
@@ -2487,13 +2487,34 @@ function OperatorApp({ user, profile, onLogout }) {
     const { data: so } = await supabase.from('shift_orders').insert({
       turno_id: shift.id, notas: orderForm.reqNum ? `Req: ${orderForm.reqNum}` : "",
       foto_url: photoUrl, cliente_id: parseInt(orderForm.clienteId), req_num: orderForm.reqNum,
+      metodo_pagamento: orderForm.metodoPagamento,
     }).select().single();
+
     const itensValidos = orderForm.itens.filter(it => it.produtoId && parseFloat(it.qtd) > 0);
+    let totalGeral = 0;
     for (const it of itensValidos) {
       const qtd = parseFloat(it.qtd), vu = parseFloat(it.valorUnit)||0;
-      await supabase.from('orders').insert({ id: genId(), clienteId: parseInt(orderForm.clienteId), produtoId: parseInt(it.produtoId), data: orderForm.data, reqNum: orderForm.reqNum||"", qtd, valorUnit: vu, total: qtd*vu });
-      if (so) await supabase.from('shift_order_items').insert({ shift_order_id: so.id, produto_id: parseInt(it.produtoId), qtd, valor_unit: vu, total: qtd*vu });
+      const total = qtd * vu;
+      totalGeral += total;
+      await supabase.from('orders').insert({ id: genId(), clienteId: parseInt(orderForm.clienteId), produtoId: parseInt(it.produtoId), data: orderForm.data, reqNum: orderForm.reqNum||"", qtd, valorUnit: vu, total });
+      if (so) await supabase.from('shift_order_items').insert({ shift_order_id: so.id, produto_id: parseInt(it.produtoId), qtd, valor_unit: vu, total });
     }
+
+    // ── Criar entrada de caixa automaticamente ──────────────────────────
+    if (totalGeral > 0) {
+      const cli = clients.find(c => c.id === parseInt(orderForm.clienteId));
+      const { data: ce } = await supabase.from('cash_entries').insert({
+        turno_id: shift.id,
+        metodo: orderForm.metodoPagamento,
+        tipo: 'entrada',
+        valor: totalGeral,
+        notas: `Auto: ${cli?.nome?.split(",")[0] || "Cliente"}${orderForm.reqNum ? ` · Req ${orderForm.reqNum}` : ""}`,
+        origem: 'pedido',
+        shift_order_id: so?.id || null,
+      }).select().single();
+      if (ce) setCashEntries(e => [...e, ce]);
+    }
+
     const { data: updatedSO } = await supabase.from('shift_orders').select('*, shift_order_items(*, products(nome,cor,unidade))').eq('turno_id', shift.id).order('created_at');
     setShiftOrders(updatedSO||[]); setOrderForm(emptyOrderForm()); setSaving(false);
   };
@@ -2633,8 +2654,12 @@ function OperatorApp({ user, profile, onLogout }) {
 
       {tab==="caixa" && (
         <div>
+          {/* Info banner */}
+          <div style={{padding:"0.7rem 0.9rem",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"10px",marginBottom:"1rem",color:"#60a5fa",fontSize:"0.78rem",lineHeight:1.6}}>
+            💡 As entradas são criadas automaticamente quando guardas um pedido. Usa este tab para registar <strong>saídas</strong> (troco, despesas) ou <strong>ajustes manuais</strong>.
+          </div>
           <div style={{display:"flex",gap:"6px",marginBottom:"0.8rem"}}>
-            {[["entrada","▲ Entrada","#34d399"],["saida","▼ Saída","#f87171"]].map(([v,l,c])=>(
+            {[["saida","▼ Saída","#f87171"],["entrada","▲ Ajuste Manual","#f59e0b"]].map(([v,l,c])=>(
               <button key={v} onClick={()=>setCashForm(f=>({...f,type:v}))} style={{flex:1,padding:"0.6rem",borderRadius:"10px",border:`1px solid ${cashForm.type===v?c+"50":"rgba(255,255,255,0.06)"}`,background:cashForm.type===v?c+"12":"transparent",color:cashForm.type===v?c:"#475569",fontWeight:600,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
             ))}
           </div>
@@ -2677,6 +2702,19 @@ function OperatorApp({ user, profile, onLogout }) {
                   <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{display:"none"}}/>
                 </label>
               )}
+            </div>
+
+            {/* Método de Pagamento */}
+            <div style={{marginBottom:"0.9rem"}}>
+              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px"}}>Método de Pagamento *</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
+                {METODOS.map(m=>(
+                  <button key={m} type="button" onClick={()=>setOrderForm(f=>({...f,metodoPagamento:m}))}
+                    style={{padding:"5px 10px",borderRadius:"8px",border:`1px solid ${orderForm.metodoPagamento===m?(METODO_COLORS[m]||"#f59e0b")+"60":"rgba(255,255,255,0.06)"}`,background:orderForm.metodoPagamento===m?(METODO_COLORS[m]||"#f59e0b")+"15":"transparent",color:orderForm.metodoPagamento===m?METODO_COLORS[m]||"#f59e0b":"#475569",fontSize:"0.76rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    {m}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Cliente + Req */}
