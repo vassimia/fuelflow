@@ -2504,10 +2504,62 @@ function OperatorApp({ user, profile, onLogout }) {
     if (existing) await supabase.from('hose_readings').update({ leitura_final: parseFloat(value)||0 }).eq('id', existing.id);
   };
 
+  const [showRecon, setShowRecon] = useState(false);
+
+  // ── Calcular reconciliação ────────────────────────────────────────────
+  const calcRecon = () => {
+    // Litros por combustível — contadores
+    const litrosContador = {};
+    hoses.forEach(h => {
+      const r = hoseReadings[h.id];
+      const fin = parseFloat(finalReadings[h.id] || 0);
+      if (r) {
+        const l = Math.max(0, fin - (r.leitura_inicial || 0));
+        litrosContador[h.combustivel] = (litrosContador[h.combustivel] || 0) + l;
+      }
+    });
+
+    // Litros por produto — pedidos registados
+    const litrosPedidos = {};
+    shiftOrders.forEach(o => {
+      (o.shift_order_items || []).forEach(it => {
+        const prod = products.find(p => p.id === it.produto_id);
+        const cat  = prod?.combustivel || prod?.nome || "Outros";
+        litrosPedidos[cat] = (litrosPedidos[cat] || 0) + (parseFloat(it.qtd) || 0);
+      });
+    });
+
+    // Totais gerais
+    const totalLitrosContador = Object.values(litrosContador).reduce((s, v) => s + v, 0);
+    const totalLitrosPedidos  = Object.values(litrosPedidos).reduce((s, v) => s + v, 0);
+    const desvioLitros        = totalLitrosContador - totalLitrosPedidos;
+
+    // Caixa
+    const caixaRegistada = cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0);
+    const caixaEsperada  = shiftOrders.reduce((s,o)=>{
+      return s + (o.shift_order_items||[]).reduce((ss,it)=>ss+(parseFloat(it.total)||0),0);
+    }, 0);
+    const desvioCaixa = caixaRegistada - caixaEsperada;
+
+    const byMethod = METODOS.map(m=>({ m, total: cashEntries.filter(e=>e.tipo==='entrada'&&e.metodo===m).reduce((s,e)=>s+e.valor,0) })).filter(x=>x.total>0);
+
+    return { litrosContador, litrosPedidos, totalLitrosContador, totalLitrosPedidos, desvioLitros, caixaRegistada, caixaEsperada, desvioCaixa, byMethod };
+  };
+
   const closeShift = async () => {
     setClosingShift(true);
-    await supabase.from('shifts').update({ status:'fechado', fechado_em: new Date().toISOString(), total_entradas: cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0), total_saidas: cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0) }).eq('id', shift.id);
-    setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({}); setClosingShift(false);
+    const recon = calcRecon();
+    await supabase.from('shifts').update({
+      status: 'fechado',
+      fechado_em: new Date().toISOString(),
+      total_entradas:    recon.caixaRegistada,
+      total_saidas:      cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0),
+      total_litros:      recon.totalLitrosContador,
+      desvio_litros:     recon.desvioLitros,
+      desvio_caixa:      recon.desvioCaixa,
+    }).eq('id', shift.id);
+    setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({});
+    setShowRecon(false); setClosingShift(false);
     alert("✅ Turno fechado com sucesso!");
   };
 
@@ -2737,12 +2789,131 @@ function OperatorApp({ user, profile, onLogout }) {
         </div>
       )}
 
+      {/* Botão fechar turno */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:"560px",padding:"1rem",background:"linear-gradient(to top,#060d18 70%,transparent)",zIndex:100}}>
-        <button onClick={()=>{ if(window.confirm("Tens a certeza que queres fechar o turno?")) closeShift(); }} disabled={closingShift}
-          style={{width:"100%",padding:"0.85rem",background:"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 16px rgba(239,68,68,0.3)",opacity:closingShift?0.7:1}}>
-          {closingShift?"A fechar...":"🔒 Fechar Turno"}
+        <button onClick={()=>setShowRecon(true)} disabled={closingShift}
+          style={{width:"100%",padding:"0.85rem",background:"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 16px rgba(239,68,68,0.3)"}}>
+          🔒 Fechar Turno
         </button>
       </div>
+
+      {/* ── ECRÃ DE RECONCILIAÇÃO ── */}
+      {showRecon && (() => {
+        const recon = calcRecon();
+        const desvioLOK  = Math.abs(recon.desvioLitros) <= 5;
+        const desvioCOK  = Math.abs(recon.desvioCaixa)  <= 50;
+        const tudoOK     = desvioLOK && desvioCOK;
+
+        const DesvioRow = ({label, contador, pedidos, desvio, unidade, ok}) => (
+          <div style={{background:ok?"rgba(52,211,153,0.05)":"rgba(248,113,113,0.05)",border:`1px solid ${ok?"rgba(52,211,153,0.15)":"rgba(248,113,113,0.15)"}`,borderRadius:"12px",padding:"1rem",marginBottom:"0.6rem"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.6rem"}}>
+              <span style={{color:"#94a3b8",fontSize:"0.78rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</span>
+              <span style={{fontSize:"1rem"}}>{ok?"✅":"⚠️"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.5rem",textAlign:"center"}}>
+              {[{l:"Contadores",v:`${fmt(contador)} ${unidade}`,c:"#60a5fa"},{l:"Pedidos",v:`${fmt(pedidos)} ${unidade}`,c:"#a78bfa"},{l:"Desvio",v:`${desvio>=0?"+":""}${fmt(desvio)} ${unidade}`,c:ok?"#34d399":"#f87171"}].map(({l,v,c})=>(
+                <div key={l}>
+                  <div style={{color:"#334155",fontSize:"0.62rem",marginBottom:"3px"}}>{l}</div>
+                  <div style={{color:c,fontWeight:700,fontSize:"0.88rem",fontFamily:"'Syne',sans-serif"}}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:200,display:"flex",flexDirection:"column",fontFamily:"'DM Sans',sans-serif"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"1.5rem 1rem 2rem",maxWidth:"560px",margin:"0 auto",width:"100%"}}>
+
+              {/* Título */}
+              <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
+                <div style={{fontSize:"2.5rem",marginBottom:"0.5rem"}}>{tudoOK?"✅":"⚠️"}</div>
+                <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.2rem"}}>Reconciliação do Turno</div>
+                <div style={{color:"#475569",fontSize:"0.8rem",marginTop:"4px"}}>{new Date().toLocaleDateString("pt-MZ",{weekday:"long",day:"numeric",month:"long"})}</div>
+              </div>
+
+              {/* Status geral */}
+              <div style={{padding:"1rem",borderRadius:"14px",background:tudoOK?"rgba(52,211,153,0.08)":"rgba(245,158,11,0.08)",border:`1px solid ${tudoOK?"rgba(52,211,153,0.2)":"rgba(245,158,11,0.2)"}`,marginBottom:"1.2rem",textAlign:"center"}}>
+                <div style={{color:tudoOK?"#34d399":"#fbbf24",fontWeight:700,fontSize:"0.95rem"}}>
+                  {tudoOK?"Turno equilibrado — tudo confere!":"Atenção: existem desvios a verificar"}
+                </div>
+                {!tudoOK&&<div style={{color:"#475569",fontSize:"0.78rem",marginTop:"4px"}}>Revê os valores antes de fechar</div>}
+              </div>
+
+              {/* Litros */}
+              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Combustível — Contadores vs Pedidos</div>
+              <DesvioRow label="Litros totais" contador={recon.totalLitrosContador} pedidos={recon.totalLitrosPedidos} desvio={recon.desvioLitros} unidade="L" ok={desvioLOK}/>
+
+              {/* Detalhes por combustível */}
+              {Object.keys({...recon.litrosContador,...recon.litrosPedidos}).length>0&&(
+                <div style={{marginBottom:"1.2rem"}}>
+                  {[...new Set([...Object.keys(recon.litrosContador),...Object.keys(recon.litrosPedidos)])].map(comb=>{
+                    const lc = recon.litrosContador[comb]||0;
+                    const lp = recon.litrosPedidos[comb]||0;
+                    const dev = lc - lp;
+                    const ok  = Math.abs(dev) <= 2;
+                    return (
+                      <div key={comb} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.55rem 0.9rem",background:"rgba(255,255,255,0.02)",borderRadius:"8px",marginBottom:"4px",border:"1px solid rgba(255,255,255,0.04)"}}>
+                        <span style={{color:"#94a3b8",fontSize:"0.82rem"}}>{comb}</span>
+                        <div style={{display:"flex",gap:"1rem",alignItems:"center"}}>
+                          <span style={{color:"#60a5fa",fontSize:"0.8rem"}}>{fmt(lc)} L</span>
+                          <span style={{color:"#475569",fontSize:"0.7rem"}}>vs</span>
+                          <span style={{color:"#a78bfa",fontSize:"0.8rem"}}>{fmt(lp)} L</span>
+                          <span style={{color:ok?"#34d399":"#f87171",fontWeight:700,fontSize:"0.8rem"}}>{dev>=0?"+":""}{fmt(dev)} L</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Caixa */}
+              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Caixa — Esperado vs Registado</div>
+              <DesvioRow label="Total caixa" contador={recon.caixaEsperada} pedidos={recon.caixaRegistada} desvio={recon.desvioCaixa} unidade="MT" ok={desvioCOK}/>
+
+              {/* Por método */}
+              {recon.byMethod.length>0&&(
+                <div style={{marginBottom:"1.2rem"}}>
+                  {recon.byMethod.map(({m,total})=>(
+                    <div key={m} style={{display:"flex",justifyContent:"space-between",padding:"0.5rem 0.9rem",background:"rgba(255,255,255,0.02)",borderRadius:"8px",marginBottom:"4px"}}>
+                      <span style={{color:"#94a3b8",fontSize:"0.82rem"}}>{m}</span>
+                      <span style={{color:"#e2e8f0",fontWeight:600,fontSize:"0.82rem"}}>{fmt(total)} MT</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Resumo final */}
+              <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"14px",padding:"1rem",marginBottom:"1.5rem"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem"}}>
+                  {[
+                    {l:"Total Litros",v:`${fmt(recon.totalLitrosContador)} L`,c:"#60a5fa"},
+                    {l:"Total Pedidos",v:`${shiftOrders.length}`,c:"#a78bfa"},
+                    {l:"Entradas Caixa",v:`${fmt(recon.caixaRegistada)} MT`,c:"#34d399"},
+                    {l:"Saídas Caixa",v:`${fmt(cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0))} MT`,c:"#f87171"},
+                  ].map(({l,v,c})=>(
+                    <div key={l} style={{textAlign:"center",padding:"0.7rem",background:"rgba(0,0,0,0.2)",borderRadius:"9px"}}>
+                      <div style={{color:"#334155",fontSize:"0.62rem",textTransform:"uppercase",letterSpacing:"0.08em"}}>{l}</div>
+                      <div style={{color:c,fontWeight:700,fontSize:"0.95rem",marginTop:"3px",fontFamily:"'Syne',sans-serif"}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Botões fixos em baixo */}
+            <div style={{padding:"1rem",background:"#060d18",borderTop:"1px solid rgba(255,255,255,0.04)",maxWidth:"560px",margin:"0 auto",width:"100%",display:"flex",gap:"0.8rem"}}>
+              <button onClick={()=>setShowRecon(false)} style={{flex:1,padding:"0.75rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"12px",color:"#94a3b8",fontWeight:600,cursor:"pointer",fontFamily:"inherit",fontSize:"0.85rem"}}>
+                ← Voltar
+              </button>
+              <button onClick={closeShift} disabled={closingShift}
+                style={{flex:2,padding:"0.75rem",background:tudoOK?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:"0.88rem",opacity:closingShift?0.7:1}}>
+                {closingShift?"A fechar...":`${tudoOK?"✅ Confirmar e Fechar":"⚠️ Fechar com Desvios"}`}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2971,7 +3142,7 @@ function TurnosAdmin() {
     setSelected(shift);
     const [{ data: ce }, { data: so }, { data: hr }] = await Promise.all([
       supabase.from('cash_entries').select('*').eq('turno_id', shift.id).order('created_at'),
-      supabase.from('shift_orders').select('*').eq('turno_id', shift.id).order('created_at'),
+      supabase.from('shift_orders').select('*, shift_order_items(*, products(nome,cor,unidade,combustivel))').eq('turno_id', shift.id).order('created_at'),
       supabase.from('hose_readings').select('*, hoses(nome,combustivel,cor)').eq('turno_id', shift.id),
     ]);
     setDetail({ cashEntries: ce||[], shiftOrders: so||[], hoseReadings: hr||[] });
@@ -3006,23 +3177,71 @@ function TurnosAdmin() {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1rem"}}>
               <div>
                 <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.95rem"}}>{selected.operador_nome}</div>
-                <div style={{color:"#475569",fontSize:"0.78rem",marginTop:"2px"}}>{fmtDate(selected.data)} · Aberto: {selected.aberto_em?new Date(selected.aberto_em).toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+                <div style={{color:"#475569",fontSize:"0.78rem",marginTop:"2px"}}>
+                  {fmtDate(selected.data)} · {selected.aberto_em?new Date(selected.aberto_em).toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}):"—"}
+                  {selected.fechado_em&&<> → {new Date(selected.fechado_em).toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"})}</>}
+                </div>
               </div>
               <Badge status={selected.status==="aberto"?"pendente":"pago"}/>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.6rem"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.5rem"}}>
               {[
-                {l:"Entradas",v:fmt(detail.cashEntries.filter(e=>e.tipo==="entrada").reduce((s,e)=>s+e.valor,0)),c:"#34d399"},
-                {l:"Saídas",  v:fmt(detail.cashEntries.filter(e=>e.tipo==="saida").reduce((s,e)=>s+e.valor,0)),  c:"#f87171"},
-                {l:"Pedidos", v:detail.shiftOrders.length,c:"#60a5fa"},
+                {l:"Entradas",v:`${fmt(detail.cashEntries.filter(e=>e.tipo==="entrada").reduce((s,e)=>s+e.valor,0))} MT`,c:"#34d399"},
+                {l:"Saídas",  v:`${fmt(detail.cashEntries.filter(e=>e.tipo==="saida").reduce((s,e)=>s+e.valor,0))} MT`,  c:"#f87171"},
+                {l:"Pedidos", v:detail.shiftOrders.length, c:"#60a5fa"},
+                {l:"Litros",  v:`${fmt(selected.total_litros||0)} L`, c:"#fbbf24"},
               ].map(({l,v,c})=>(
-                <div key={l} style={{textAlign:"center",padding:"0.7rem",background:"rgba(0,0,0,0.25)",borderRadius:"10px"}}>
-                  <div style={{color:"#334155",fontSize:"0.65rem",textTransform:"uppercase",letterSpacing:"0.08em"}}>{l}</div>
-                  <div style={{color:c,fontSize:"1rem",fontWeight:700,marginTop:"3px"}}>{v}{l!=="Pedidos"?" MT":""}</div>
+                <div key={l} style={{textAlign:"center",padding:"0.6rem 0.4rem",background:"rgba(0,0,0,0.25)",borderRadius:"10px"}}>
+                  <div style={{color:"#334155",fontSize:"0.6rem",textTransform:"uppercase",letterSpacing:"0.08em"}}>{l}</div>
+                  <div style={{color:c,fontSize:"0.85rem",fontWeight:700,marginTop:"3px"}}>{v}</div>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* ── RECONCILIAÇÃO ── */}
+          {selected.status==="fechado" && (() => {
+            const totalLitrosC = detail.hoseReadings.reduce((s,r)=>s+Math.max(0,(r.leitura_final||0)-(r.leitura_inicial||0)),0);
+            const totalLitrosP = detail.shiftOrders.reduce((s,o)=>s+(o.shift_order_items||[]).reduce((ss,it)=>ss+(parseFloat(it.qtd)||0),0),0);
+            const desvioL      = totalLitrosC - totalLitrosP;
+            const caixaReg     = detail.cashEntries.filter(e=>e.tipo==="entrada").reduce((s,e)=>s+e.valor,0);
+            const caixaEsp     = detail.shiftOrders.reduce((s,o)=>s+(o.shift_order_items||[]).reduce((ss,it)=>ss+(parseFloat(it.total)||0),0),0);
+            const desvioC      = caixaReg - caixaEsp;
+            const desvioLOK    = Math.abs(desvioL) <= 5;
+            const desvioCOK    = Math.abs(desvioC) <= 50;
+            const tudoOK       = desvioLOK && desvioCOK;
+
+            const Row = ({label, a, b, desvio, unidade, ok}) => (
+              <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr",gap:"0.5rem",alignItems:"center",padding:"0.6rem 0",borderBottom:C.borderFaint}}>
+                <span style={{color:"#94a3b8",fontSize:"0.8rem"}}>{label}</span>
+                <span style={{textAlign:"right",color:"#60a5fa",fontSize:"0.8rem",fontWeight:500}}>{fmt(a)} {unidade}</span>
+                <span style={{textAlign:"right",color:"#a78bfa",fontSize:"0.8rem",fontWeight:500}}>{fmt(b)} {unidade}</span>
+                <span style={{textAlign:"right",color:ok?"#34d399":"#f87171",fontSize:"0.82rem",fontWeight:700}}>{desvio>=0?"+":""}{fmt(desvio)} {unidade}</span>
+              </div>
+            );
+
+            return (
+              <Card style={{marginBottom:"1.2rem",border:`1px solid ${tudoOK?"rgba(52,211,153,0.2)":"rgba(245,158,11,0.2)"}`}}>
+                <div style={{padding:"1rem 1.2rem 0.5rem",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.88rem"}}>Reconciliação</div>
+                  <div style={{padding:"3px 12px",borderRadius:"999px",fontSize:"0.72rem",fontWeight:700,background:tudoOK?"rgba(52,211,153,0.1)":"rgba(245,158,11,0.1)",color:tudoOK?"#34d399":"#fbbf24",border:`1px solid ${tudoOK?"rgba(52,211,153,0.2)":"rgba(245,158,11,0.2)"}`}}>
+                    {tudoOK?"✅ Equilibrado":"⚠️ Com desvios"}
+                  </div>
+                </div>
+                <div style={{padding:"0 1.2rem"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr",gap:"0.5rem",padding:"0.4rem 0",marginBottom:"2px"}}>
+                    {["","Contadores","Pedidos","Desvio"].map((h,i)=><div key={i} style={{color:"#334155",fontSize:"0.65rem",fontWeight:600,textTransform:"uppercase",textAlign:i>0?"right":"left"}}>{h}</div>)}
+                  </div>
+                  <Row label="Litros" a={totalLitrosC} b={totalLitrosP} desvio={desvioL} unidade="L" ok={desvioLOK}/>
+                  <Row label="Caixa" a={caixaEsp} b={caixaReg} desvio={desvioC} unidade="MT" ok={desvioCOK}/>
+                </div>
+                {!tudoOK&&<div style={{margin:"0.8rem 1.2rem 1rem",padding:"0.7rem 1rem",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.15)",borderRadius:"10px",color:"#fbbf24",fontSize:"0.78rem",lineHeight:1.6}}>
+                  {!desvioLOK&&<div>⛽ Desvio de {fmt(Math.abs(desvioL))} L nos contadores vs pedidos registados.</div>}
+                  {!desvioCOK&&<div>💰 Desvio de {fmt(Math.abs(desvioC))} MT na caixa vs valor dos pedidos.</div>}
+                </div>}
+              </Card>
+            );
+          })()}
 
           {/* Contadores */}
           {detail.hoseReadings.length>0&&(
