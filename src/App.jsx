@@ -2380,22 +2380,23 @@ function LoginScreen({ onAdminLogin, onOperatorLogin }) {
 // OPERATOR APP — Registo de Turno
 // ════════════════════════════════════════════════════════════════════════════
 function OperatorApp({ user, profile, onLogout }) {
-  const [shift, setShift]         = useState(null);   // turno activo
-  const [hoses, setHoses]         = useState([]);
+  const [shift, setShift]             = useState(null);
+  const [hoses, setHoses]             = useState([]);
+  const [clients, setClients]         = useState([]);
+  const [products, setProducts]       = useState([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [tab, setTab]             = useState("caixa"); // caixa | pedidos | contadores
+  const [tab, setTab]                 = useState("caixa");
   const [cashEntries, setCashEntries] = useState([]);
   const [shiftOrders, setShiftOrders] = useState([]);
-  const [hoseReadings, setHoseReadings] = useState([]);
-  const [saving, setSaving]       = useState(false);
+  const [hoseReadings, setHoseReadings] = useState({});
+  const [saving, setSaving]           = useState(false);
   const [closingShift, setClosingShift] = useState(false);
-
-  // Cash form
-  const [cashForm, setCashForm]   = useState({ method:"Cash", type:"entrada", valor:"", notas:"" });
-  // Order form
-  const [orderForm, setOrderForm] = useState({ notas:"", photoFile:null, photoPreview:null });
-  // Final readings for close
+  const [cashForm, setCashForm]       = useState({ method:"Cash", type:"entrada", valor:"", notas:"" });
+  const emptyOrderForm = () => ({ clienteId:"", reqNum:"", data:new Date().toISOString().split("T")[0], photoFile:null, photoPreview:null, itens:[{ produtoId:"", qtd:"", valorUnit:"" }] });
+  const [orderForm, setOrderForm]     = useState(emptyOrderForm());
   const [finalReadings, setFinalReadings] = useState({});
+  const [startReadings, setStartReadings] = useState({});
+  const [startingShift, setStartingShift] = useState(false);
 
   const METODOS = ["Cash","e-Mola","M-Pesa","POS BIM","POS STB","POS Moza","POS BCI"];
   const METODO_COLORS = {"Cash":"#f59e0b","e-Mola":"#10b981","M-Pesa":"#3b82f6","POS BIM":"#8b5cf6","POS STB":"#06b6d4","POS Moza":"#f43f5e","POS BCI":"#f97316"};
@@ -2404,224 +2405,165 @@ function OperatorApp({ user, profile, onLogout }) {
 
   const loadOperatorData = async () => {
     setLoadingData(true);
-    // Load hoses
-    const { data: hosesData } = await supabase.from('hoses').select('*').order('numero');
-    setHoses(hosesData || []);
-    // Check for open shift today
+    const [{ data: hosesData }, { data: clientsData }, { data: productsData }] = await Promise.all([
+      supabase.from('hoses').select('*').order('numero'),
+      supabase.from('clients').select('id,nome,tipo').order('nome'),
+      supabase.from('products').select('*').order('nome'),
+    ]);
+    setHoses(hosesData||[]); setClients(clientsData||[]); setProducts(productsData||[]);
     const today = new Date().toISOString().split("T")[0];
-    const { data: shiftData } = await supabase
-      .from('shifts')
-      .select('*')
-      .eq('operador_account_id', user.id)
-      .eq('data', today)
-      .eq('status', 'aberto')
-      .single();
+    const { data: shiftData } = await supabase.from('shifts').select('*').eq('operador_account_id', user.id).eq('data', today).eq('status', 'aberto').single();
     if (shiftData) {
       setShift(shiftData);
-      // Load existing entries
       const [{ data: ce }, { data: so }, { data: hr }] = await Promise.all([
         supabase.from('cash_entries').select('*').eq('turno_id', shiftData.id).order('created_at'),
-        supabase.from('shift_orders').select('*').eq('turno_id', shiftData.id).order('created_at'),
+        supabase.from('shift_orders').select('*, shift_order_items(*, products(nome,cor,unidade))').eq('turno_id', shiftData.id).order('created_at'),
         supabase.from('hose_readings').select('*').eq('turno_id', shiftData.id),
       ]);
-      setCashEntries(ce || []);
-      setShiftOrders(so || []);
-      const readingsMap = {};
-      (hr||[]).forEach(r => { readingsMap[r.mangueira_id] = r; });
-      setHoseReadings(readingsMap);
-      const finals = {};
-      (hr||[]).forEach(r => { finals[r.mangueira_id] = r.leitura_final || ""; });
-      setFinalReadings(finals);
+      setCashEntries(ce||[]); setShiftOrders(so||[]);
+      const rm = {}; (hr||[]).forEach(r => { rm[r.mangueira_id] = r; }); setHoseReadings(rm);
+      const fin = {}; (hr||[]).forEach(r => { fin[r.mangueira_id] = r.leitura_final||""; }); setFinalReadings(fin);
     }
     setLoadingData(false);
   };
-
-  // ── Abrir turno ───────────────────────────────────────────────────────
-  const [startReadings, setStartReadings] = useState({});
-  const [startingShift, setStartingShift] = useState(false);
 
   const openShift = async () => {
     setStartingShift(true);
     const today = new Date().toISOString().split("T")[0];
     const { data: newShift, error: shiftErr } = await supabase.from('shifts').insert({
-      operador_id: null,
-      operador_account_id: user.id,
-      operador_nome: profile?.nome || user.username || user.nome,
-      data: today,
-      status: 'aberto',
-      aberto_em: new Date().toISOString(),
+      operador_id: null, operador_account_id: user.id,
+      operador_nome: profile?.nome||user.nome||user.username,
+      data: today, status: 'aberto', aberto_em: new Date().toISOString(),
     }).select().single();
-    if (shiftErr) { console.error(shiftErr); alert("Erro ao iniciar turno: " + shiftErr.message); setStartingShift(false); return; }
+    if (shiftErr) { alert("Erro ao iniciar turno: " + shiftErr.message); setStartingShift(false); return; }
     if (newShift) {
       for (const [hoseId, leitura] of Object.entries(startReadings)) {
-        if (leitura) {
-          await supabase.from('hose_readings').insert({
-            turno_id: newShift.id,
-            mangueira_id: parseInt(hoseId),
-            leitura_inicial: parseFloat(leitura) || 0,
-            leitura_final: null,
-          });
-        }
+        if (leitura) await supabase.from('hose_readings').insert({ turno_id: newShift.id, mangueira_id: parseInt(hoseId), leitura_inicial: parseFloat(leitura)||0, leitura_final: null });
       }
-      setShift(newShift);
-      await loadOperatorData();
+      setShift(newShift); await loadOperatorData();
     }
     setStartingShift(false);
   };
 
-  // ── Registar entrada/saída de caixa ──────────────────────────────────
   const saveCashEntry = async () => {
     if (!cashForm.valor || parseFloat(cashForm.valor) <= 0) return;
     setSaving(true);
-    const { data } = await supabase.from('cash_entries').insert({
-      turno_id: shift.id,
-      metodo: cashForm.method,
-      tipo: cashForm.type,
-      valor: parseFloat(cashForm.valor),
-      notas: cashForm.notas,
-    }).select().single();
+    const { data } = await supabase.from('cash_entries').insert({ turno_id: shift.id, metodo: cashForm.method, tipo: cashForm.type, valor: parseFloat(cashForm.valor), notas: cashForm.notas }).select().single();
     if (data) setCashEntries(e => [...e, data]);
     setCashForm(f => ({ ...f, valor:"", notas:"" }));
     setSaving(false);
   };
 
-  // ── Registar pedido com foto ──────────────────────────────────────────
   const handlePhoto = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => setOrderForm(f => ({ ...f, photoFile: file, photoPreview: ev.target.result }));
     reader.readAsDataURL(file);
   };
 
+  const addItem    = () => setOrderForm(f => ({ ...f, itens: [...f.itens, { produtoId:"", qtd:"", valorUnit:"" }] }));
+  const removeItem = (i) => setOrderForm(f => ({ ...f, itens: f.itens.filter((_,idx)=>idx!==i) }));
+  const updateItem = (i, field, value) => {
+    setOrderForm(f => {
+      const itens = [...f.itens]; itens[i] = { ...itens[i], [field]: value };
+      if (field === 'produtoId') { const prod = products.find(p => p.id === parseInt(value)); if (prod) itens[i].valorUnit = prod.preco; }
+      return { ...f, itens };
+    });
+  };
+
+  const totalPedido = orderForm.itens.reduce((s, it) => s + (parseFloat(it.qtd)||0)*(parseFloat(it.valorUnit)||0), 0);
+  const canSaveOrder = orderForm.clienteId && orderForm.itens.some(it => it.produtoId && parseFloat(it.qtd) > 0);
+
   const saveOrder = async () => {
+    if (!canSaveOrder) return;
     setSaving(true);
     let photoUrl = null;
     if (orderForm.photoFile) {
-      const ext  = orderForm.photoFile.name.split('.').pop();
+      const ext = orderForm.photoFile.name.split('.').pop();
       const path = `pedidos/${shift.id}_${Date.now()}.${ext}`;
       const { data: up } = await supabase.storage.from('shift-photos').upload(path, orderForm.photoFile);
-      if (up) {
-        const { data: url } = supabase.storage.from('shift-photos').getPublicUrl(path);
-        photoUrl = url?.publicUrl;
-      }
+      if (up) { const { data: url } = supabase.storage.from('shift-photos').getPublicUrl(path); photoUrl = url?.publicUrl; }
     }
-    const { data } = await supabase.from('shift_orders').insert({
-      turno_id: shift.id,
-      notas: orderForm.notas,
-      foto_url: photoUrl,
+    const { data: so } = await supabase.from('shift_orders').insert({
+      turno_id: shift.id, notas: orderForm.reqNum ? `Req: ${orderForm.reqNum}` : "",
+      foto_url: photoUrl, cliente_id: parseInt(orderForm.clienteId), req_num: orderForm.reqNum,
     }).select().single();
-    if (data) setShiftOrders(o => [...o, data]);
-    setOrderForm({ notas:"", photoFile:null, photoPreview:null });
-    setSaving(false);
+    const itensValidos = orderForm.itens.filter(it => it.produtoId && parseFloat(it.qtd) > 0);
+    for (const it of itensValidos) {
+      const qtd = parseFloat(it.qtd), vu = parseFloat(it.valorUnit)||0;
+      await supabase.from('orders').insert({ id: genId(), clienteId: parseInt(orderForm.clienteId), produtoId: parseInt(it.produtoId), data: orderForm.data, reqNum: orderForm.reqNum||"", qtd, valorUnit: vu, total: qtd*vu });
+      if (so) await supabase.from('shift_order_items').insert({ shift_order_id: so.id, produto_id: parseInt(it.produtoId), qtd, valor_unit: vu, total: qtd*vu });
+    }
+    const { data: updatedSO } = await supabase.from('shift_orders').select('*, shift_order_items(*, products(nome,cor,unidade))').eq('turno_id', shift.id).order('created_at');
+    setShiftOrders(updatedSO||[]); setOrderForm(emptyOrderForm()); setSaving(false);
   };
 
-  // ── Salvar leituras finais ────────────────────────────────────────────
   const saveFinalReading = async (hoseId, value) => {
     setFinalReadings(r => ({ ...r, [hoseId]: value }));
     const existing = hoseReadings[hoseId];
-    if (existing) {
-      await supabase.from('hose_readings').update({ leitura_final: parseFloat(value)||0 }).eq('id', existing.id);
-    }
+    if (existing) await supabase.from('hose_readings').update({ leitura_final: parseFloat(value)||0 }).eq('id', existing.id);
   };
 
-  // ── Fechar turno ──────────────────────────────────────────────────────
   const closeShift = async () => {
     setClosingShift(true);
-    await supabase.from('shifts').update({
-      status: 'fechado',
-      fechado_em: new Date().toISOString(),
-      total_entradas: cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0),
-      total_saidas: cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0),
-    }).eq('id', shift.id);
-    setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({});
-    setClosingShift(false);
+    await supabase.from('shifts').update({ status:'fechado', fechado_em: new Date().toISOString(), total_entradas: cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0), total_saidas: cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0) }).eq('id', shift.id);
+    setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({}); setClosingShift(false);
     alert("✅ Turno fechado com sucesso!");
   };
 
-  // Totais
-  const totalEntradas  = cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0);
-  const totalSaidas    = cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0);
-  const saldoCaixa     = totalEntradas - totalSaidas;
+  const totalEntradas = cashEntries.filter(e=>e.tipo==='entrada').reduce((s,e)=>s+e.valor,0);
+  const totalSaidas   = cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0);
+  const saldoCaixa    = totalEntradas - totalSaidas;
+  const byMethod      = METODOS.map(m=>({ m, total: cashEntries.filter(e=>e.tipo==='entrada'&&e.metodo===m).reduce((s,e)=>s+e.valor,0) })).filter(x=>x.total>0);
+  const inputS        = {width:"100%",padding:"0.55rem 0.8rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"9px",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit",outline:"none"};
 
-  const byMethod = METODOS.map(m => ({
-    m, total: cashEntries.filter(e=>e.tipo==='entrada'&&e.metodo===m).reduce((s,e)=>s+e.valor,0)
-  })).filter(x=>x.total>0);
+  if (loadingData) return <div style={{background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",color:"#475569"}}>A carregar...</div>;
 
-  if (loadingData) return (
-    <div style={{background:"#060d18",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",color:"#475569"}}>
-      A carregar...
-    </div>
-  );
-
-  // ── SE não há turno aberto → Ecrã de início ──────────────────────────
   if (!shift) return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",color:"#e2e8f0",padding:"1.5rem",maxWidth:"520px",margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"2rem"}}>
         <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <Icon name="fuel" size={15}/>
-          </div>
-          <div>
-            <div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.9rem"}}>FuelFlow</div>
-            <div style={{color:"#334155",fontSize:"0.65rem"}}>{profile?.nome || user.email}</div>
-          </div>
+          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="fuel" size={15}/></div>
+          <div><div style={{color:"#f1f5f9",fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.9rem"}}>FuelFlow</div><div style={{color:"#334155",fontSize:"0.65rem"}}>{profile?.nome||user.nome||user.username}</div></div>
         </div>
         <button onClick={onLogout} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"8px",color:"#f87171",cursor:"pointer",padding:"0.4rem 0.8rem",fontSize:"0.75rem",fontWeight:600}}>Sair</button>
       </div>
-
       <div style={{textAlign:"center",padding:"1rem 0 2rem"}}>
         <div style={{fontSize:"2.5rem",marginBottom:"0.5rem"}}>⛽</div>
         <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"1.1rem",fontFamily:"'Syne',sans-serif"}}>Iniciar Turno</div>
         <div style={{color:"#475569",fontSize:"0.82rem",marginTop:"4px"}}>{new Date().toLocaleDateString("pt-MZ",{weekday:"long",day:"numeric",month:"long"})}</div>
       </div>
-
       <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.5rem",marginBottom:"1.2rem"}}>
         <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Leituras Iniciais dos Contadores</div>
-        {hoses.length === 0 && <div style={{color:"#475569",fontSize:"0.82rem",textAlign:"center",padding:"1rem"}}>Nenhuma mangueira configurada.<br/>Pede ao admin para configurar as mangueiras.</div>}
-        {hoses.map(h => (
+        {hoses.length===0&&<div style={{color:"#475569",fontSize:"0.82rem",textAlign:"center",padding:"1rem"}}>Nenhuma mangueira configurada.</div>}
+        {hoses.map(h=>(
           <div key={h.id} style={{display:"flex",alignItems:"center",gap:"0.8rem",marginBottom:"0.8rem"}}>
             <div style={{width:"8px",height:"8px",borderRadius:"50%",background:h.cor||"#f59e0b",flexShrink:0}}/>
             <div style={{flex:1,color:"#cbd5e1",fontSize:"0.85rem",fontWeight:500}}>{h.nome} <span style={{color:"#475569",fontSize:"0.75rem"}}>({h.combustivel})</span></div>
-            <input type="number" step="0.01" placeholder="0.00" value={startReadings[h.id]||""}
-              onChange={e=>setStartReadings(r=>({...r,[h.id]:e.target.value}))}
+            <input type="number" step="0.01" placeholder="0.00" value={startReadings[h.id]||""} onChange={e=>setStartReadings(r=>({...r,[h.id]:e.target.value}))}
               style={{width:"110px",padding:"0.5rem 0.8rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"8px",color:"#e2e8f0",fontSize:"0.85rem",textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
             <span style={{color:"#475569",fontSize:"0.75rem"}}>L</span>
           </div>
         ))}
       </div>
-
-      <button onClick={openShift} disabled={startingShift}
-        style={{width:"100%",padding:"0.9rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.95rem",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.3)",fontFamily:"inherit",opacity:startingShift?0.7:1}}>
+      <button onClick={openShift} disabled={startingShift} style={{width:"100%",padding:"0.9rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.95rem",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.3)",fontFamily:"inherit",opacity:startingShift?0.7:1}}>
         {startingShift?"A iniciar...":"▶ Iniciar Turno"}
       </button>
     </div>
   );
 
-  // ── TURNO ACTIVO ─────────────────────────────────────────────────────
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#060d18",minHeight:"100vh",color:"#e2e8f0",maxWidth:"560px",margin:"0 auto",padding:"1rem 1rem 6rem"}}>
-      {/* Header */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.2rem",padding:"0.2rem 0"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.2rem"}}>
         <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <Icon name="fuel" size={15}/>
-          </div>
-          <div>
-            <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.88rem"}}>Turno Activo</div>
-            <div style={{color:"#334155",fontSize:"0.68rem"}}>{profile?.nome||user.email} · {new Date().toLocaleDateString("pt-MZ")}</div>
-          </div>
+          <div style={{width:"32px",height:"32px",borderRadius:"10px",background:"linear-gradient(135deg,#f59e0b,#b45309)",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="fuel" size={15}/></div>
+          <div><div style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.88rem"}}>Turno Activo</div><div style={{color:"#334155",fontSize:"0.68rem"}}>{profile?.nome||user.nome||user.username} · {new Date().toLocaleDateString("pt-MZ")}</div></div>
         </div>
         <button onClick={onLogout} style={{background:"transparent",border:"none",color:"#334155",cursor:"pointer",fontSize:"0.75rem"}}>Sair</button>
       </div>
 
-      {/* Saldo rápido */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.6rem",marginBottom:"1.2rem"}}>
-        {[
-          {label:"Entradas",value:fmt(totalEntradas),color:"#34d399"},
-          {label:"Saídas",  value:fmt(totalSaidas),  color:"#f87171"},
-          {label:"Saldo",   value:fmt(saldoCaixa),   color:saldoCaixa>=0?"#60a5fa":"#f87171"},
-        ].map(({label,value,color})=>(
+        {[{label:"Entradas",value:fmt(totalEntradas),color:"#34d399"},{label:"Saídas",value:fmt(totalSaidas),color:"#f87171"},{label:"Saldo",value:fmt(saldoCaixa),color:saldoCaixa>=0?"#60a5fa":"#f87171"}].map(({label,value,color})=>(
           <div key={label} style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:"12px",padding:"0.8rem 0.7rem",textAlign:"center"}}>
             <div style={{color:"#334155",fontSize:"0.65rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em"}}>{label}</div>
             <div style={{color,fontSize:"0.95rem",fontWeight:700,fontFamily:"'Syne',sans-serif",marginTop:"3px"}}>{value}</div>
@@ -2629,149 +2571,150 @@ function OperatorApp({ user, profile, onLogout }) {
         ))}
       </div>
 
-      {/* Tabs */}
       <div style={{display:"flex",gap:"4px",marginBottom:"1.2rem",background:"rgba(255,255,255,0.03)",padding:"4px",borderRadius:"12px"}}>
-        {[["caixa","💰 Caixa"],["pedidos","📋 Pedidos"],["contadores","⛽ Contadores"]].map(([t,l])=>(
-          <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"0.55rem 0.3rem",borderRadius:"9px",border:"none",background:tab===t?"linear-gradient(135deg,#f59e0b,#d97706)":  "transparent",color:tab===t?"#000":"#475569",fontWeight:tab===t?700:400,fontSize:"0.75rem",cursor:"pointer",transition:"all 0.15s",fontFamily:"inherit"}}>
+        {[["caixa","💰 Caixa"],["pedidos",`📋 Pedidos${shiftOrders.length>0?` (${shiftOrders.length})`:""}`],["contadores","⛽ Contadores"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"0.55rem 0.3rem",borderRadius:"9px",border:"none",background:tab===t?"linear-gradient(135deg,#f59e0b,#d97706)":"transparent",color:tab===t?"#000":"#475569",fontWeight:tab===t?700:400,fontSize:"0.75rem",cursor:"pointer",fontFamily:"inherit"}}>
             {l}
           </button>
         ))}
       </div>
 
-      {/* ── TAB: CAIXA ── */}
       {tab==="caixa" && (
         <div>
-          {/* Tipo entrada/saída */}
           <div style={{display:"flex",gap:"6px",marginBottom:"0.8rem"}}>
-            {[["entrada","Entrada","#34d399"],["saida","Saída","#f87171"]].map(([v,l,c])=>(
-              <button key={v} onClick={()=>setCashForm(f=>({...f,type:v}))} style={{flex:1,padding:"0.6rem",borderRadius:"10px",border:`1px solid`,borderColor:cashForm.type===v?c+"50":"rgba(255,255,255,0.06)",background:cashForm.type===v?c+"12":"transparent",color:cashForm.type===v?c:"#475569",fontWeight:600,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit"}}>
-                {cashForm.type===v?(v==="entrada"?"▲ ":"▼ "):""}{l}
-              </button>
+            {[["entrada","▲ Entrada","#34d399"],["saida","▼ Saída","#f87171"]].map(([v,l,c])=>(
+              <button key={v} onClick={()=>setCashForm(f=>({...f,type:v}))} style={{flex:1,padding:"0.6rem",borderRadius:"10px",border:`1px solid ${cashForm.type===v?c+"50":"rgba(255,255,255,0.06)"}`,background:cashForm.type===v?c+"12":"transparent",color:cashForm.type===v?c:"#475569",fontWeight:600,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
             ))}
           </div>
-
-          {/* Método */}
           <div style={{marginBottom:"0.8rem"}}>
             <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Método</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
               {METODOS.map(m=>(
-                <button key={m} onClick={()=>setCashForm(f=>({...f,method:m}))} style={{padding:"5px 10px",borderRadius:"8px",border:"1px solid",borderColor:cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"50":"rgba(255,255,255,0.06)",background:cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"12":"transparent",color:cashForm.method===m?METODO_COLORS[m]||"#f59e0b":"#475569",fontSize:"0.76rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                  {m}
-                </button>
+                <button key={m} onClick={()=>setCashForm(f=>({...f,method:m}))} style={{padding:"5px 10px",borderRadius:"8px",border:`1px solid ${cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"50":"rgba(255,255,255,0.06)"}`,background:cashForm.method===m?(METODO_COLORS[m]||"#f59e0b")+"12":"transparent",color:cashForm.method===m?METODO_COLORS[m]||"#f59e0b":"#475569",fontSize:"0.76rem",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{m}</button>
               ))}
             </div>
           </div>
-
-          {/* Valor + Notas */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem",marginBottom:"0.8rem"}}>
-            <div>
-              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Valor (MT) *</div>
-              <input type="number" step="0.01" placeholder="0.00" value={cashForm.valor}
-                onChange={e=>setCashForm(f=>({...f,valor:e.target.value}))}
-                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.95rem",fontWeight:600,fontFamily:"inherit",outline:"none"}}/>
-            </div>
-            <div>
-              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Notas</div>
-              <input type="text" placeholder="Opcional" value={cashForm.notas}
-                onChange={e=>setCashForm(f=>({...f,notas:e.target.value}))}
-                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit",outline:"none"}}/>
-            </div>
+            <div><div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Valor (MT) *</div><input type="number" step="0.01" placeholder="0.00" value={cashForm.valor} onChange={e=>setCashForm(f=>({...f,valor:e.target.value}))} style={inputS}/></div>
+            <div><div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"6px"}}>Notas</div><input type="text" placeholder="Opcional" value={cashForm.notas} onChange={e=>setCashForm(f=>({...f,notas:e.target.value}))} style={inputS}/></div>
           </div>
-
-          <button onClick={saveCashEntry} disabled={saving||!cashForm.valor}
-            style={{width:"100%",padding:"0.75rem",background:cashForm.type==="entrada"?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.88rem",cursor:"pointer",fontFamily:"inherit",marginBottom:"1.5rem",opacity:!cashForm.valor||saving?0.5:1}}>
+          <button onClick={saveCashEntry} disabled={saving||!cashForm.valor} style={{width:"100%",padding:"0.75rem",background:cashForm.type==="entrada"?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.88rem",cursor:"pointer",fontFamily:"inherit",marginBottom:"1.5rem",opacity:!cashForm.valor||saving?0.5:1}}>
             {saving?"A guardar...":`${cashForm.type==="entrada"?"▲ Registar Entrada":"▼ Registar Saída"} · ${fmt(parseFloat(cashForm.valor)||0)} MT`}
           </button>
-
-          {/* Resumo por método */}
-          {byMethod.length > 0 && (
-            <div style={{marginBottom:"1.2rem"}}>
-              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Entradas por Método</div>
-              {byMethod.map(({m,total})=>(
-                <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.03)"}}>
-                  <span style={{color:METODO_COLORS[m]||"#94a3b8",fontSize:"0.82rem",fontWeight:600}}>{m}</span>
-                  <span style={{color:"#e2e8f0",fontSize:"0.85rem",fontWeight:600}}>{fmt(total)} MT</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Histórico */}
-          {cashEntries.length > 0 && (
-            <div>
-              <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Histórico do Turno ({cashEntries.length})</div>
-              {[...cashEntries].reverse().map(e=>(
-                <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",border:`1px solid ${e.tipo==="entrada"?"rgba(52,211,153,0.1)":"rgba(248,113,113,0.1)"}`}}>
-                  <div>
-                    <div style={{color:"#e2e8f0",fontSize:"0.82rem",fontWeight:500}}>{e.metodo}{e.notas&&<span style={{color:"#334155"}}> · {e.notas}</span>}</div>
-                  </div>
-                  <div style={{color:e.tipo==="entrada"?"#34d399":"#f87171",fontWeight:700,fontSize:"0.88rem"}}>
-                    {e.tipo==="entrada"?"+":"-"}{fmt(e.valor)} MT
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {byMethod.length>0&&<div style={{marginBottom:"1.2rem"}}><div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Entradas por Método</div>{byMethod.map(({m,total})=><div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px"}}><span style={{color:METODO_COLORS[m]||"#94a3b8",fontSize:"0.82rem",fontWeight:600}}>{m}</span><span style={{color:"#e2e8f0",fontWeight:600,fontSize:"0.85rem"}}>{fmt(total)} MT</span></div>)}</div>}
+          {cashEntries.length>0&&<div><div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.6rem"}}>Histórico ({cashEntries.length})</div>{[...cashEntries].reverse().map(e=><div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.6rem 0.8rem",marginBottom:"4px",background:"rgba(255,255,255,0.02)",borderRadius:"8px",border:`1px solid ${e.tipo==="entrada"?"rgba(52,211,153,0.1)":"rgba(248,113,113,0.1)"}`}}><div style={{color:"#e2e8f0",fontSize:"0.82rem"}}>{e.metodo}{e.notas&&<span style={{color:"#334155"}}> · {e.notas}</span>}</div><div style={{color:e.tipo==="entrada"?"#34d399":"#f87171",fontWeight:700,fontSize:"0.88rem"}}>{e.tipo==="entrada"?"+":"-"}{fmt(e.valor)} MT</div></div>)}</div>}
         </div>
       )}
 
-      {/* ── TAB: PEDIDOS ── */}
       {tab==="pedidos" && (
         <div>
           <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"14px",padding:"1.2rem",marginBottom:"1rem"}}>
-            <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.8rem"}}>Registar Pedido / Requisição</div>
+            <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Novo Pedido / Requisição</div>
 
             {/* Foto */}
-            <div style={{marginBottom:"0.8rem"}}>
+            <div style={{marginBottom:"1rem"}}>
               {orderForm.photoPreview ? (
                 <div style={{position:"relative"}}>
-                  <img src={orderForm.photoPreview} alt="preview" style={{width:"100%",maxHeight:"180px",objectFit:"cover",borderRadius:"10px",border:"1px solid rgba(255,255,255,0.06)"}}/>
-                  <button onClick={()=>setOrderForm(f=>({...f,photoFile:null,photoPreview:null}))}
-                    style={{position:"absolute",top:"8px",right:"8px",background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",color:"#fff",width:"28px",height:"28px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"0.8rem"}}>✕</button>
+                  <img src={orderForm.photoPreview} alt="preview" style={{width:"100%",maxHeight:"160px",objectFit:"cover",borderRadius:"10px",border:"1px solid rgba(255,255,255,0.06)"}}/>
+                  <button onClick={()=>setOrderForm(f=>({...f,photoFile:null,photoPreview:null}))} style={{position:"absolute",top:"8px",right:"8px",background:"rgba(0,0,0,0.75)",border:"none",borderRadius:"50%",color:"#fff",width:"28px",height:"28px",cursor:"pointer",fontSize:"0.8rem"}}>✕</button>
                 </div>
               ) : (
-                <label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px",padding:"1.5rem",background:"rgba(255,255,255,0.02)",border:"1px dashed rgba(255,255,255,0.1)",borderRadius:"10px",cursor:"pointer"}}>
-                  <span style={{fontSize:"1.8rem"}}>📷</span>
-                  <span style={{color:"#475569",fontSize:"0.8rem"}}>Tirar foto / Escolher imagem</span>
+                <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",padding:"1rem",background:"rgba(255,255,255,0.02)",border:"1px dashed rgba(255,255,255,0.1)",borderRadius:"10px",cursor:"pointer"}}>
+                  <span style={{fontSize:"1.4rem"}}>📷</span>
+                  <span style={{color:"#475569",fontSize:"0.82rem"}}>Tirar foto da requisição (opcional)</span>
                   <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{display:"none"}}/>
                 </label>
               )}
             </div>
 
-            {/* Notas */}
-            <div style={{marginBottom:"0.8rem"}}>
-              <textarea value={orderForm.notas} onChange={e=>setOrderForm(f=>({...f,notas:e.target.value}))}
-                placeholder="Notas do pedido (nº requisição, cliente, observações...)" rows={3}
-                style={{width:"100%",padding:"0.65rem 0.9rem",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"10px",color:"#e2e8f0",fontSize:"0.85rem",fontFamily:"inherit",resize:"vertical",outline:"none"}}/>
+            {/* Cliente + Req */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem",marginBottom:"0.9rem"}}>
+              <div>
+                <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"5px"}}>Cliente *</div>
+                <select value={orderForm.clienteId} onChange={e=>setOrderForm(f=>({...f,clienteId:e.target.value}))} style={inputS}>
+                  <option value="">— Seleccionar —</option>
+                  {clients.map(c=><option key={c.id} value={c.id}>{c.nome.split(",")[0]}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"5px"}}>Nº Requisição</div>
+                <input value={orderForm.reqNum} onChange={e=>setOrderForm(f=>({...f,reqNum:e.target.value}))} placeholder="001" style={inputS}/>
+              </div>
             </div>
 
-            <button onClick={saveOrder} disabled={saving||(!orderForm.notas&&!orderForm.photoFile)}
-              style={{width:"100%",padding:"0.7rem",background:"linear-gradient(135deg,#3b82f6,#2563eb)",color:"#fff",border:"none",borderRadius:"10px",fontWeight:600,fontSize:"0.85rem",cursor:"pointer",fontFamily:"inherit",opacity:(!orderForm.notas&&!orderForm.photoFile)||saving?0.5:1}}>
+            {/* Produtos */}
+            <div style={{marginBottom:"0.8rem"}}>
+              <div style={{color:"#475569",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px"}}>Produtos *</div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:"4px",marginBottom:"4px"}}>
+                {["Produto","Qtd (L)","P.Unit",""].map((h,i)=><div key={i} style={{color:"#334155",fontSize:"0.62rem",textAlign:i>0?"right":"left",paddingLeft:i===0?"2px":"0"}}>{h}</div>)}
+              </div>
+              {orderForm.itens.map((it, i) => (
+                <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:"4px",marginBottom:"5px",alignItems:"center"}}>
+                  <select value={it.produtoId} onChange={e=>updateItem(i,"produtoId",e.target.value)} style={{...inputS,fontSize:"0.78rem",padding:"0.5rem 0.5rem"}}>
+                    <option value="">— Produto —</option>
+                    {products.map(p=><option key={p.id} value={p.id}>{p.nome}</option>)}
+                  </select>
+                  <input type="number" step="0.01" placeholder="0" value={it.qtd} onChange={e=>updateItem(i,"qtd",e.target.value)} style={{...inputS,textAlign:"right",padding:"0.5rem 0.5rem"}}/>
+                  <input type="number" step="0.01" placeholder="0.00" value={it.valorUnit} onChange={e=>updateItem(i,"valorUnit",e.target.value)} style={{...inputS,textAlign:"right",padding:"0.5rem 0.5rem"}}/>
+                  <button onClick={()=>removeItem(i)} disabled={orderForm.itens.length===1}
+                    style={{width:"28px",height:"28px",borderRadius:"7px",border:"1px solid rgba(248,113,113,0.2)",background:"rgba(248,113,113,0.08)",color:orderForm.itens.length===1?"#1e293b":"#f87171",cursor:orderForm.itens.length===1?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.1rem",flexShrink:0,lineHeight:1}}>×</button>
+                </div>
+              ))}
+              <button onClick={addItem} style={{width:"100%",padding:"0.5rem",background:"rgba(245,158,11,0.06)",border:"1px dashed rgba(245,158,11,0.2)",borderRadius:"8px",color:"#f59e0b",cursor:"pointer",fontSize:"0.8rem",fontWeight:600,fontFamily:"inherit",marginTop:"4px"}}>
+                + Adicionar produto
+              </button>
+            </div>
+
+            {totalPedido>0&&(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0.7rem 0.9rem",background:"rgba(245,158,11,0.06)",borderRadius:"10px",border:"1px solid rgba(245,158,11,0.15)",marginBottom:"0.8rem"}}>
+                <span style={{color:"#475569",fontSize:"0.82rem"}}>Total do pedido</span>
+                <span style={{color:"#f59e0b",fontWeight:700,fontSize:"1.1rem",fontFamily:"'Syne',sans-serif"}}>{fmt(totalPedido)} MT</span>
+              </div>
+            )}
+
+            <button onClick={saveOrder} disabled={saving||!canSaveOrder} style={{width:"100%",padding:"0.75rem",background:"linear-gradient(135deg,#3b82f6,#2563eb)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.88rem",cursor:"pointer",fontFamily:"inherit",opacity:!canSaveOrder||saving?0.5:1}}>
               {saving?"A guardar...":"📋 Guardar Pedido"}
             </button>
           </div>
 
-          {/* Lista pedidos */}
-          {shiftOrders.length === 0 && <div style={{textAlign:"center",padding:"2rem",color:"#334155",fontSize:"0.82rem"}}>Nenhum pedido registado ainda</div>}
-          {[...shiftOrders].reverse().map(o=>(
-            <div key={o.id} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:"12px",overflow:"hidden",marginBottom:"0.6rem"}}>
-              {o.foto_url && <img src={o.foto_url} alt="pedido" style={{width:"100%",maxHeight:"140px",objectFit:"cover"}} onClick={()=>window.open(o.foto_url,'_blank')}/>}
-              {o.notas && <div style={{padding:"0.7rem 0.9rem",color:"#94a3b8",fontSize:"0.82rem"}}>{o.notas}</div>}
-            </div>
-          ))}
+          {shiftOrders.length===0&&<div style={{textAlign:"center",padding:"2rem",color:"#334155",fontSize:"0.82rem"}}>Nenhum pedido registado ainda</div>}
+          {[...shiftOrders].reverse().map(o=>{
+            const cli = clients.find(c=>c.id===o.cliente_id);
+            const itens = o.shift_order_items||[];
+            const totalO = itens.reduce((s,it)=>s+(it.total||0),0);
+            return (
+              <div key={o.id} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.05)",borderRadius:"12px",overflow:"hidden",marginBottom:"0.7rem"}}>
+                {o.foto_url&&<img src={o.foto_url} alt="req" style={{width:"100%",maxHeight:"120px",objectFit:"cover",cursor:"pointer"}} onClick={()=>window.open(o.foto_url,'_blank')}/>}
+                <div style={{padding:"0.8rem 0.9rem"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.5rem"}}>
+                    <div style={{color:"#e2e8f0",fontWeight:600,fontSize:"0.85rem"}}>{cli?.nome?.split(",")[0]||"—"}</div>
+                    {o.req_num&&<div style={{color:"#475569",fontSize:"0.72rem",fontFamily:"monospace"}}>Req: {o.req_num}</div>}
+                  </div>
+                  {itens.map((it,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderTop:i>0?"1px solid rgba(255,255,255,0.03)":"none"}}>
+                      <span style={{color:it.products?.cor||"#94a3b8",fontSize:"0.8rem"}}>{it.products?.nome||"—"} · {fmt(it.qtd)} {it.products?.unidade||"L"}</span>
+                      <span style={{color:"#94a3b8",fontSize:"0.8rem"}}>{fmt(it.total)} MT</span>
+                    </div>
+                  ))}
+                  {totalO>0&&<div style={{display:"flex",justifyContent:"flex-end",marginTop:"5px",borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:"5px"}}>
+                    <span style={{color:"#f59e0b",fontWeight:700,fontSize:"0.85rem"}}>{fmt(totalO)} MT</span>
+                  </div>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* ── TAB: CONTADORES ── */}
       {tab==="contadores" && (
         <div>
           <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"14px",padding:"1.2rem",marginBottom:"1rem"}}>
             <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Leituras Finais dos Contadores</div>
             {hoses.map(h=>{
               const reading = hoseReadings[h.id];
-              const inicial = reading?.leitura_inicial ?? "—";
-              const final_  = finalReadings[h.id] ?? "";
-              const litros  = reading && final_ ? Math.max(0, parseFloat(final_) - parseFloat(inicial)) : null;
+              const inicial = reading?.leitura_inicial??"—";
+              const final_  = finalReadings[h.id]??"";
+              const litros  = reading && final_ ? Math.max(0, parseFloat(final_)-parseFloat(inicial)) : null;
               return (
                 <div key={h.id} style={{marginBottom:"1rem",padding:"0.9rem",background:"rgba(0,0,0,0.25)",borderRadius:"10px",border:"1px solid rgba(255,255,255,0.04)"}}>
                   <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"0.6rem"}}>
@@ -2780,22 +2723,13 @@ function OperatorApp({ user, profile, onLogout }) {
                     <span style={{color:"#334155",fontSize:"0.75rem"}}>({h.combustivel})</span>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.6rem"}}>
-                    <div>
-                      <div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Inicial</div>
-                      <div style={{color:"#60a5fa",fontSize:"0.9rem",fontWeight:600}}>{fmt(inicial)} L</div>
-                    </div>
-                    <div>
-                      <div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Final</div>
-                      <input type="number" step="0.01" placeholder="0.00" value={final_}
-                        onChange={e=>saveFinalReading(h.id, e.target.value)}
+                    <div><div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Inicial</div><div style={{color:"#60a5fa",fontSize:"0.9rem",fontWeight:600}}>{fmt(inicial)} L</div></div>
+                    <div><div style={{color:"#334155",fontSize:"0.65rem",marginBottom:"4px"}}>Final</div>
+                      <input type="number" step="0.01" placeholder="0.00" value={final_} onChange={e=>saveFinalReading(h.id, e.target.value)}
                         style={{width:"100%",padding:"0.4rem 0.7rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"8px",color:"#e2e8f0",fontSize:"0.88rem",fontFamily:"inherit",outline:"none"}}/>
                     </div>
                   </div>
-                  {litros !== null && litros >= 0 && (
-                    <div style={{marginTop:"0.5rem",padding:"0.4rem 0.7rem",background:"rgba(245,158,11,0.08)",borderRadius:"8px",color:"#fbbf24",fontSize:"0.82rem",fontWeight:600,textAlign:"center"}}>
-                      ⛽ {fmt(litros)} L vendidos
-                    </div>
-                  )}
+                  {litros!==null&&litros>=0&&<div style={{marginTop:"0.5rem",padding:"0.4rem 0.7rem",background:"rgba(245,158,11,0.08)",borderRadius:"8px",color:"#fbbf24",fontSize:"0.82rem",fontWeight:600,textAlign:"center"}}>⛽ {fmt(litros)} L vendidos</div>}
                 </div>
               );
             })}
@@ -2803,10 +2737,8 @@ function OperatorApp({ user, profile, onLogout }) {
         </div>
       )}
 
-      {/* Botão fechar turno - fixo em baixo */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:"560px",padding:"1rem",background:"linear-gradient(to top,#060d18 70%,transparent)",zIndex:100}}>
-        <button onClick={()=>{ if(window.confirm("Tens a certeza que queres fechar o turno?")) closeShift(); }}
-          disabled={closingShift}
+        <button onClick={()=>{ if(window.confirm("Tens a certeza que queres fechar o turno?")) closeShift(); }} disabled={closingShift}
           style={{width:"100%",padding:"0.85rem",background:"linear-gradient(135deg,#ef4444,#dc2626)",color:"#fff",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.9rem",cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 16px rgba(239,68,68,0.3)",opacity:closingShift?0.7:1}}>
           {closingShift?"A fechar...":"🔒 Fechar Turno"}
         </button>
@@ -2815,9 +2747,6 @@ function OperatorApp({ user, profile, onLogout }) {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ADMIN — GESTÃO DE MANGUEIRAS
-// ════════════════════════════════════════════════════════════════════════════
 function HosesAdmin() {
   const [hoses, setHoses]   = useState([]);
   const [modal, setModal]   = useState(false);
