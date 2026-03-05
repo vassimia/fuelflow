@@ -2437,8 +2437,25 @@ function OperatorApp({ user, profile, onLogout }) {
     }).select().single();
     if (shiftErr) { alert("Erro ao iniciar turno: " + shiftErr.message); setStartingShift(false); return; }
     if (newShift) {
-      for (const [hoseId, leitura] of Object.entries(startReadings)) {
-        if (leitura) await supabase.from('hose_readings').insert({ turno_id: newShift.id, mangueira_id: parseInt(hoseId), leitura_inicial: parseFloat(leitura)||0, leitura_final: null });
+      // Para cada mangueira, busca a última leitura final — ou usa a leitura base do admin
+      for (const hose of hoses) {
+        const { data: lastReading } = await supabase
+          .from('hose_readings')
+          .select('leitura_final')
+          .eq('mangueira_id', hose.id)
+          .not('leitura_final', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        const leituraInicial = lastReading?.leitura_final ?? hose.leitura_base ?? 0;
+
+        await supabase.from('hose_readings').insert({
+          turno_id: newShift.id,
+          mangueira_id: hose.id,
+          leitura_inicial: leituraInicial,
+          leitura_final: null,
+        });
       }
       setShift(newShift); await loadOperatorData();
     }
@@ -2601,26 +2618,38 @@ function OperatorApp({ user, profile, onLogout }) {
         </div>
         <button onClick={onLogout} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:"8px",color:"#f87171",cursor:"pointer",padding:"0.4rem 0.8rem",fontSize:"0.75rem",fontWeight:600}}>Sair</button>
       </div>
-      <div style={{textAlign:"center",padding:"1rem 0 2rem"}}>
-        <div style={{fontSize:"2.5rem",marginBottom:"0.5rem"}}>⛽</div>
-        <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"1.1rem",fontFamily:"'Syne',sans-serif"}}>Iniciar Turno</div>
-        <div style={{color:"#475569",fontSize:"0.82rem",marginTop:"4px"}}>{new Date().toLocaleDateString("pt-MZ",{weekday:"long",day:"numeric",month:"long"})}</div>
+
+      <div style={{textAlign:"center",padding:"3rem 0 2rem"}}>
+        <div style={{fontSize:"3rem",marginBottom:"1rem"}}>⛽</div>
+        <div style={{color:"#f1f5f9",fontWeight:700,fontSize:"1.2rem",fontFamily:"'Syne',sans-serif",marginBottom:"0.5rem"}}>Iniciar Turno</div>
+        <div style={{color:"#475569",fontSize:"0.85rem"}}>{new Date().toLocaleDateString("pt-MZ",{weekday:"long",day:"numeric",month:"long"})}</div>
       </div>
-      <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.5rem",marginBottom:"1.2rem"}}>
-        <div style={{color:"#64748b",fontSize:"0.7rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"1rem"}}>Leituras Iniciais dos Contadores</div>
-        {hoses.length===0&&<div style={{color:"#475569",fontSize:"0.82rem",textAlign:"center",padding:"1rem"}}>Nenhuma mangueira configurada.</div>}
-        {hoses.map(h=>(
-          <div key={h.id} style={{display:"flex",alignItems:"center",gap:"0.8rem",marginBottom:"0.8rem"}}>
-            <div style={{width:"8px",height:"8px",borderRadius:"50%",background:h.cor||"#f59e0b",flexShrink:0}}/>
-            <div style={{flex:1,color:"#cbd5e1",fontSize:"0.85rem",fontWeight:500}}>{h.nome} <span style={{color:"#475569",fontSize:"0.75rem"}}>({h.combustivel})</span></div>
-            <input type="number" step="0.01" placeholder="0.00" value={startReadings[h.id]||""} onChange={e=>setStartReadings(r=>({...r,[h.id]:e.target.value}))}
-              style={{width:"110px",padding:"0.5rem 0.8rem",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"8px",color:"#e2e8f0",fontSize:"0.85rem",textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
-            <span style={{color:"#475569",fontSize:"0.75rem"}}>L</span>
+
+      {/* Mostrar leituras iniciais (automáticas, só para informação) */}
+      {hoses.length > 0 && (
+        <div style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.2rem",marginBottom:"1.5rem"}}>
+          <div style={{color:"#334155",fontSize:"0.68rem",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"0.8rem"}}>Leituras Iniciais (automáticas)</div>
+          {hoses.map(h => (
+            <div key={h.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0.5rem 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                <div style={{width:"7px",height:"7px",borderRadius:"50%",background:h.cor||"#f59e0b"}}/>
+                <span style={{color:"#94a3b8",fontSize:"0.83rem"}}>{h.nome}</span>
+                <span style={{color:"#334155",fontSize:"0.72rem"}}>({h.combustivel})</span>
+              </div>
+              <span style={{color:"#60a5fa",fontWeight:600,fontSize:"0.85rem",fontFamily:"'Syne',sans-serif"}}>
+                {fmt(h.leitura_base ?? 0)} L
+              </span>
+            </div>
+          ))}
+          <div style={{marginTop:"0.8rem",padding:"0.5rem 0.7rem",background:"rgba(59,130,246,0.06)",borderRadius:"8px",color:"#60a5fa",fontSize:"0.72rem"}}>
+            ℹ️ Leituras herdadas do turno anterior. Qualquer discrepância deve ser reportada ao admin.
           </div>
-        ))}
-      </div>
-      <button onClick={openShift} disabled={startingShift} style={{width:"100%",padding:"0.9rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"0.95rem",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.3)",fontFamily:"inherit",opacity:startingShift?0.7:1}}>
-        {startingShift?"A iniciar...":"▶ Iniciar Turno"}
+        </div>
+      )}
+
+      <button onClick={openShift} disabled={startingShift}
+        style={{width:"100%",padding:"1rem",background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:"12px",fontWeight:700,fontSize:"1rem",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.3)",fontFamily:"inherit",opacity:startingShift?0.7:1}}>
+        {startingShift?"A iniciar turno...":"▶ Iniciar Turno"}
       </button>
     </div>
   );
@@ -2957,9 +2986,9 @@ function OperatorApp({ user, profile, onLogout }) {
 }
 
 function HosesAdmin() {
-  const [hoses, setHoses]   = useState([]);
-  const [modal, setModal]   = useState(false);
-  const [form, setForm]     = useState({});
+  const [hoses, setHoses]     = useState([]);
+  const [modal, setModal]     = useState(false);
+  const [form, setForm]       = useState({});
   const [loading, setLoading] = useState(true);
 
   const COMBUSTIVEIS = ["Gasolina","Diesel","Petróleo","Óleo Motor"];
@@ -2967,7 +2996,7 @@ function HosesAdmin() {
 
   useEffect(() => { load(); }, []);
   const load = async () => { const { data } = await supabase.from('hoses').select('*').order('numero'); setHoses(data||[]); setLoading(false); };
-  const openNew  = () => { setForm({ nome:"", combustivel:"Gasolina", numero:"", cor:"#f59e0b" }); setModal(true); };
+  const openNew  = () => { setForm({ nome:"", combustivel:"Gasolina", numero:"", cor:"#f59e0b", leitura_base: 0 }); setModal(true); };
   const openEdit = (h) => { setForm({...h}); setModal(true); };
   const handleSave = async () => {
     if (!form.nome) return;
@@ -2980,17 +3009,22 @@ function HosesAdmin() {
 
   return (
     <div>
-      <PageHeader title="Mangueiras / Bombas" sub="Configura as mangueiras para os operadores"
+      <PageHeader title="Mangueiras / Bombas" sub="Configura as mangueiras e leituras base"
         action={<Btn onClick={openNew} icon="plus">Nova Mangueira</Btn>}/>
+
+      <div style={{padding:"0.8rem 1rem",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"12px",marginBottom:"1.2rem",color:"#60a5fa",fontSize:"0.8rem",lineHeight:1.7}}>
+        ℹ️ A <strong>Leitura Base</strong> é o valor inicial do contador quando o sistema começou a ser usado. A partir daí, cada turno herda automaticamente a leitura final do turno anterior.
+      </div>
+
       <Card>
         {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
-          <Table headers={["Nº","Nome","Combustível","Cor","Ações"]}>
+          <Table headers={["Nº","Nome","Combustível","Leitura Base","Ações"]}>
             {hoses.map(h=>(
               <TR key={h.id}>
                 <TD bold>{h.numero||"—"}</TD>
                 <TD><div style={{display:"flex",alignItems:"center",gap:"8px"}}><div style={{width:"10px",height:"10px",borderRadius:"50%",background:h.cor}}/>{h.nome}</div></TD>
                 <TD>{h.combustivel}</TD>
-                <TD><div style={{width:"24px",height:"24px",borderRadius:"6px",background:h.cor,border:"1px solid rgba(255,255,255,0.1)"}}/></TD>
+                <TD><span style={{color:"#60a5fa",fontWeight:600,fontFamily:"'Syne',sans-serif"}}>{fmt(h.leitura_base||0)} L</span></TD>
                 <TD><div style={{display:"flex",gap:"5px"}}>
                   <IconBtn onClick={()=>openEdit(h)} icon="edit" color="#f59e0b"/>
                   <IconBtn onClick={()=>handleDelete(h.id)} icon="trash" color="#f87171"/>
@@ -3001,6 +3035,7 @@ function HosesAdmin() {
         )}
         {!loading&&hoses.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhuma mangueira. Clica em "Nova Mangueira" para começar.</div>}
       </Card>
+
       {modal&&(
         <Modal title={form.id?"Editar Mangueira":"Nova Mangueira"} onClose={()=>setModal(false)}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
@@ -3011,6 +3046,10 @@ function HosesAdmin() {
             <Select value={form.combustivel||"Gasolina"} onChange={e=>setForm(f=>({...f,combustivel:e.target.value}))}>
               {COMBUSTIVEIS.map(c=><option key={c} value={c}>{c}</option>)}
             </Select>
+          </Field>
+          <Field label="Leitura Base (L) — valor actual do contador">
+            <Input type="number" step="0.01" value={form.leitura_base||""} onChange={e=>setForm(f=>({...f,leitura_base:e.target.value}))} placeholder="ex: 125430.50"/>
+            <div style={{color:"#334155",fontSize:"0.7rem",marginTop:"4px"}}>Insere o valor que o contador físico mostra agora. Só precisas de fazer isto uma vez.</div>
           </Field>
           <Field label="Cor">
             <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
