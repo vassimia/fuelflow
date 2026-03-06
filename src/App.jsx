@@ -3454,6 +3454,93 @@ function TanquesAdmin() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// ADMIN — MANGUEIRAS
+// ════════════════════════════════════════════════════════════════════════════
+function HosesAdmin() {
+  const [hoses, setHoses]     = useState([]);
+  const [modal, setModal]     = useState(false);
+  const [form, setForm]       = useState({});
+  const [loading, setLoading] = useState(true);
+
+  const COMBUSTIVEIS = ["Gasolina","Diesel","Petróleo","Óleo Motor"];
+  const CORES = ["#f59e0b","#3b82f6","#8b5cf6","#10b981","#f43f5e","#06b6d4","#f97316"];
+
+  useEffect(() => { load(); }, []);
+  const load = async () => { const { data } = await supabase.from('hoses').select('*').order('numero'); setHoses(data||[]); setLoading(false); };
+  const openNew  = () => { setForm({ nome:"", combustivel:"Gasolina", numero:"", cor:"#f59e0b", leitura_base: 0 }); setModal(true); };
+  const openEdit = (h) => { setForm({...h}); setModal(true); };
+  const handleSave = async () => {
+    if (!form.nome) return;
+    const { id, ...data } = form;
+    if (id) { await supabase.from('hoses').update(data).eq('id',id); }
+    else     { await supabase.from('hoses').insert(data); }
+    setModal(false); load();
+  };
+  const handleDelete = async (id) => { if(window.confirm("Eliminar mangueira?")) { await supabase.from('hoses').delete().eq('id',id); load(); } };
+
+  return (
+    <div>
+      <PageHeader title="Mangueiras / Bombas" sub="Configura as mangueiras e leituras base"
+        action={<Btn onClick={openNew} icon="plus">Nova Mangueira</Btn>}/>
+
+      <div style={{padding:"0.8rem 1rem",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"12px",marginBottom:"1.2rem",color:"#60a5fa",fontSize:"0.8rem",lineHeight:1.7}}>
+        ℹ️ A <strong>Leitura Base</strong> é o valor actual do contador quando o sistema começou a ser usado. A partir daí, cada turno herda automaticamente a leitura final do turno anterior.
+      </div>
+
+      <Card>
+        {loading ? <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div> : (
+          <Table headers={["Nº","Nome","Combustível","Leitura Base","Ações"]}>
+            {hoses.map(h=>(
+              <TR key={h.id}>
+                <TD bold>{h.numero||"—"}</TD>
+                <TD><div style={{display:"flex",alignItems:"center",gap:"8px"}}><div style={{width:"10px",height:"10px",borderRadius:"50%",background:h.cor}}/>{h.nome}</div></TD>
+                <TD>{h.combustivel}</TD>
+                <TD><span style={{color:"#60a5fa",fontWeight:600,fontFamily:"'Syne',sans-serif"}}>{fmt(h.leitura_base||0)} L</span></TD>
+                <TD><div style={{display:"flex",gap:"5px"}}>
+                  <IconBtn onClick={()=>openEdit(h)} icon="edit" color="#f59e0b"/>
+                  <IconBtn onClick={()=>handleDelete(h.id)} icon="trash" color="#f87171"/>
+                </div></TD>
+              </TR>
+            ))}
+          </Table>
+        )}
+        {!loading&&hoses.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhuma mangueira. Clica em "Nova Mangueira" para começar.</div>}
+      </Card>
+
+      {modal&&(
+        <Modal title={form.id?"Editar Mangueira":"Nova Mangueira"} onClose={()=>setModal(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Nome *"><Input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="ex: Mangueira 1"/></Field>
+            <Field label="Nº Bomba"><Input value={form.numero||""} onChange={e=>setForm(f=>({...f,numero:e.target.value}))} placeholder="1"/></Field>
+          </div>
+          <Field label="Combustível">
+            <Select value={form.combustivel||"Gasolina"} onChange={e=>setForm(f=>({...f,combustivel:e.target.value}))}>
+              {COMBUSTIVEIS.map(c=><option key={c} value={c}>{c}</option>)}
+            </Select>
+          </Field>
+          <Field label="Leitura Base (L) — valor actual do contador">
+            <Input type="number" step="0.01" value={form.leitura_base||""} onChange={e=>setForm(f=>({...f,leitura_base:e.target.value}))} placeholder="ex: 125430.50"/>
+            <div style={{color:"#334155",fontSize:"0.7rem",marginTop:"4px"}}>Insere o valor que o contador físico mostra agora. Só precisas de fazer isto uma vez.</div>
+          </Field>
+          <Field label="Cor">
+            <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+              {CORES.map(c=>(
+                <button key={c} onClick={()=>setForm(f=>({...f,cor:c}))}
+                  style={{width:"32px",height:"32px",borderRadius:"8px",background:c,border:`2px solid ${form.cor===c?"#fff":"transparent"}`,cursor:"pointer"}}/>
+              ))}
+            </div>
+          </Field>
+          <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1rem"}}>
+            <Btn onClick={()=>setModal(false)} variant="secondary">Cancelar</Btn>
+            <Btn onClick={handleSave} icon="save">Guardar</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // ADMIN — GESTÃO DE UTILIZADORES
 // ════════════════════════════════════════════════════════════════════════════
 function UsersAdmin({ currentUser }) {
