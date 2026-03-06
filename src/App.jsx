@@ -510,48 +510,96 @@ const FilterPill = ({ label, active, onClick, activeColor="#f59e0b" }) => (
 
 // DASHBOARD
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ orders, clients, products, payments, onNavTo }) {
+function Dashboard({ orders, clients, products, payments, tanks, onNavTo }) {
   const totalFaturado = orders.filter(o=>o.status!=="cancelado").reduce((s,o)=>s+o.total,0);
   const totalRecebido = payments.reduce((s,p)=>s+p.valor,0);
   const totalDivida   = Math.max(0, totalFaturado-totalRecebido);
   const totalLitros   = orders.reduce((s,o)=>s+o.qtd,0);
 
-  const byProduct = products.map(p=>({ ...p, total: orders.filter(o=>o.produtoId===p.id).reduce((s,o)=>s+o.total,0) })).filter(p=>p.total>0);
+  const byProduct    = products.map(p=>({ ...p, total: orders.filter(o=>o.produtoId===p.id).reduce((s,o)=>s+o.total,0) })).filter(p=>p.total>0);
   const clientSaldos = clients.map(c=>({...c,...calcSaldo(c.id,orders,payments)})).sort((a,b)=>a.saldo-b.saldo);
-  const recent = [...orders].sort((a,b)=>new Date(b.data)-new Date(a.data)).slice(0,5);
+  const recent       = [...orders].sort((a,b)=>new Date(b.data)-new Date(a.data)).slice(0,5);
+
+  const pct        = (nivel, cap) => cap > 0 ? Math.min(100,(nivel/cap)*100) : 0;
+  const nivelColor = (p) => p > 50 ? "#34d399" : p > 25 ? "#f59e0b" : "#f87171";
+  const tanquesCrit = tanks.filter(t => pct(t.nivel_actual,t.capacidade) <= 25);
 
   return (
     <div>
       <PageHeader title="Dashboard" sub="Visão geral do sistema de gestão de combustíveis"/>
 
+      {/* Alerta tanques críticos */}
+      {tanquesCrit.length > 0 && (
+        <div style={{padding:"0.8rem 1rem",background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:"12px",marginBottom:"1.2rem",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"1rem",flexWrap:"wrap"}}>
+          <div style={{color:"#f87171",fontWeight:600,fontSize:"0.85rem"}}>
+            ⚠️ {tanquesCrit.length === 1 ? `Tanque "${tanquesCrit[0].nome}"` : `${tanquesCrit.length} tanques`} com nível baixo
+          </div>
+          <button onClick={()=>onNavTo("tanques")} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:"8px",color:"#f87171",cursor:"pointer",padding:"0.3rem 0.8rem",fontSize:"0.75rem",fontWeight:600,fontFamily:"inherit"}}>
+            Ver Tanques →
+          </button>
+        </div>
+      )}
+
       {/* KPI row */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:"1rem", marginBottom:"1.5rem" }}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
         <StatCard label="Total Faturado"   value={`${fmt(totalFaturado)} MT`} sub={`${orders.length} pedidos`}      color="#f59e0b" icon="money"/>
         <StatCard label="Total Recebido"   value={`${fmt(totalRecebido)} MT`} sub={`${payments.length} pagamentos`} color="#10b981" icon="payments"/>
         <StatCard label="Por Receber"      value={`${fmt(totalDivida)} MT`}   sub="em aberto"                       color="#ef4444" icon="alert"/>
         <StatCard label="Volume Fornecido" value={`${fmt(totalLitros)} L`}    sub="todos os produtos"               color="#3b82f6" icon="fuel"/>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"1.2rem", marginBottom:"1.2rem" }}>
+      {/* Tanques */}
+      {tanks.length > 0 && (
+        <Card style={{marginBottom:"1.2rem"}}>
+          <CardHeader title="Nível dos Tanques" action={
+            <button onClick={()=>onNavTo("tanques")} style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontSize:"0.75rem",fontWeight:600,padding:0}}>Gerir →</button>
+          }/>
+          <div style={{padding:"1rem 1.2rem",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"1rem"}}>
+            {tanks.map(t => {
+              const p   = pct(t.nivel_actual, t.capacidade);
+              const cor = nivelColor(p);
+              return (
+                <div key={t.id} style={{padding:"1rem",background:C.bgDeep,borderRadius:"12px",border:`1px solid ${p<=25?"rgba(248,113,113,0.2)":"rgba(255,255,255,0.04)"}`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"0.7rem"}}>
+                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:t.cor||"#f59e0b"}}/>
+                    <span style={{color:"#e2e8f0",fontWeight:600,fontSize:"0.85rem",flex:1}}>{t.nome}</span>
+                    <span style={{color:"#334155",fontSize:"0.7rem"}}>{t.combustivel}</span>
+                  </div>
+                  <div style={{height:"8px",background:"rgba(255,255,255,0.05)",borderRadius:"999px",overflow:"hidden",marginBottom:"0.5rem"}}>
+                    <div style={{height:"100%",width:`${p}%`,background:`linear-gradient(90deg,${t.cor||cor},${t.cor||cor}cc)`,borderRadius:"999px",boxShadow:`0 0 6px ${t.cor||cor}50`,transition:"width 0.5s"}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{color:cor,fontWeight:700,fontSize:"0.88rem",fontFamily:"'Syne',sans-serif"}}>{fmt(t.nivel_actual)} L</span>
+                    <span style={{color:"#334155",fontSize:"0.7rem"}}>{p.toFixed(0)}%</span>
+                  </div>
+                  <div style={{color:"#334155",fontSize:"0.68rem",marginTop:"2px"}}>Cap: {fmt(t.capacidade)} L</div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1.2rem",marginBottom:"1.2rem"}}>
         {/* Vendas por Produto */}
         <Card>
           <CardHeader title="Vendas por Produto"/>
-          <div style={{ padding:"1.3rem 1.4rem" }}>
+          <div style={{padding:"1.3rem 1.4rem"}}>
             {byProduct.map(p => {
-              const pct = totalFaturado?(p.total/totalFaturado)*100:0;
+              const pct2 = totalFaturado?(p.total/totalFaturado)*100:0;
               return (
-                <div key={p.id} style={{ marginBottom:"1.1rem" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"6px" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-                      <div style={{ width:"8px", height:"8px", borderRadius:"50%", background:p.cor, flexShrink:0 }}/>
-                      <span style={{ color:"#cbd5e1", fontSize:"0.83rem" }}>{p.nome}</span>
+                <div key={p.id} style={{marginBottom:"1.1rem"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                      <div style={{width:"8px",height:"8px",borderRadius:"50%",background:p.cor,flexShrink:0}}/>
+                      <span style={{color:"#cbd5e1",fontSize:"0.83rem"}}>{p.nome}</span>
                     </div>
-                    <span style={{ color:p.cor, fontSize:"0.82rem", fontWeight:600 }}>{fmt(p.total)} MT</span>
+                    <span style={{color:p.cor,fontSize:"0.82rem",fontWeight:600}}>{fmt(p.total)} MT</span>
                   </div>
-                  <div style={{ height:"5px", background:"rgba(255,255,255,0.05)", borderRadius:"999px" }}>
-                    <div style={{ height:"100%", width:`${pct}%`, background:p.cor, borderRadius:"999px", boxShadow:`0 0 6px ${p.cor}60` }}/>
+                  <div style={{height:"5px",background:"rgba(255,255,255,0.05)",borderRadius:"999px"}}>
+                    <div style={{height:"100%",width:`${pct2}%`,background:p.cor,borderRadius:"999px",boxShadow:`0 0 6px ${p.cor}60`}}/>
                   </div>
-                  <div style={{ color:"#334155", fontSize:"0.68rem", marginTop:"4px", textAlign:"right" }}>{pct.toFixed(1)}%</div>
+                  <div style={{color:"#334155",fontSize:"0.68rem",marginTop:"4px",textAlign:"right"}}>{pct2.toFixed(1)}%</div>
                 </div>
               );
             })}
@@ -561,16 +609,16 @@ function Dashboard({ orders, clients, products, payments, onNavTo }) {
         {/* Saldos dos Clientes */}
         <Card>
           <CardHeader title="Saldos dos Clientes" action={
-            <button onClick={()=>onNavTo("payments")} style={{ background:"none", border:"none", color:"#f59e0b", cursor:"pointer", fontSize:"0.75rem", fontWeight:600, padding:0 }}>Ver tudo →</button>
+            <button onClick={()=>onNavTo("payments")} style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontSize:"0.75rem",fontWeight:600,padding:0}}>Ver tudo →</button>
           }/>
-          <div style={{ padding:"1rem 1.2rem", display:"flex", flexDirection:"column", gap:"0.6rem" }}>
-            {clientSaldos.map(c => (
-              <div key={c.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0.75rem 1rem", background:C.bgDeep, borderRadius:"12px", border: c.saldo<-0.01?"1px solid rgba(248,113,113,0.15)":C.borderFaint }}>
-                <div style={{ minWidth:0 }}>
-                  <div style={{ color:"#e2e8f0", fontSize:"0.82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.nome.split(",")[0]}</div>
-                  <div style={{ color:"#334155", fontSize:"0.7rem", marginTop:"2px" }}>Fat: {fmt(c.faturado)} · Pago: {fmt(c.pago)} MT</div>
+          <div style={{padding:"1rem 1.2rem",display:"flex",flexDirection:"column",gap:"0.6rem"}}>
+            {clientSaldos.map(c=>(
+              <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0.75rem 1rem",background:C.bgDeep,borderRadius:"12px",border:c.saldo<-0.01?"1px solid rgba(248,113,113,0.15)":C.borderFaint}}>
+                <div style={{minWidth:0}}>
+                  <div style={{color:"#e2e8f0",fontSize:"0.82rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nome.split(",")[0]}</div>
+                  <div style={{color:"#334155",fontSize:"0.7rem",marginTop:"2px"}}>Fat: {fmt(c.faturado)} · Pago: {fmt(c.pago)} MT</div>
                 </div>
-                <div style={{ marginLeft:"0.8rem", flexShrink:0 }}><SaldoBadge saldo={c.saldo} tipo={c.tipo}/></div>
+                <div style={{marginLeft:"0.8rem",flexShrink:0}}><SaldoBadge saldo={c.saldo} tipo={c.tipo}/></div>
               </div>
             ))}
           </div>
@@ -581,7 +629,7 @@ function Dashboard({ orders, clients, products, payments, onNavTo }) {
       <Card>
         <CardHeader title="Pedidos Recentes" sub={`${recent.length} mais recentes`}/>
         <Table headers={["Data","Req.","Cliente","Produto","Qtd.","Total","Pago","Dívida","Estado"]}>
-          {recent.map(o => {
+          {recent.map(o=>{
             const c  = clients.find(x=>x.id===o.clienteId);
             const p  = products.find(x=>x.id===o.produtoId);
             const wp = calcOrdersPago(o.clienteId,orders,payments).find(x=>x.id===o.id);
@@ -2587,15 +2635,33 @@ function OperatorApp({ user, profile, onLogout }) {
   const closeShift = async () => {
     setClosingShift(true);
     const recon = calcRecon();
+
+    // Fechar turno
     await supabase.from('shifts').update({
       status: 'fechado',
       fechado_em: new Date().toISOString(),
-      total_entradas:    recon.caixaRegistada,
-      total_saidas:      cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0),
-      total_litros:      recon.totalLitrosContador,
-      desvio_litros:     recon.desvioLitros,
-      desvio_caixa:      recon.desvioCaixa,
+      total_entradas: recon.caixaRegistada,
+      total_saidas:   cashEntries.filter(e=>e.tipo==='saida').reduce((s,e)=>s+e.valor,0),
+      total_litros:   recon.totalLitrosContador,
+      desvio_litros:  recon.desvioLitros,
+      desvio_caixa:   recon.desvioCaixa,
     }).eq('id', shift.id);
+
+    // Descontar litros consumidos de cada tanque
+    for (const hose of hoses) {
+      const r   = hoseReadings[hose.id];
+      const fin = parseFloat(finalReadings[hose.id] || 0);
+      if (!r || !fin) continue;
+      const litrosVendidos = Math.max(0, fin - (r.leitura_inicial || 0));
+      if (litrosVendidos > 0 && hose.tanque_id) {
+        const { data: tank } = await supabase.from('tanks').select('nivel_actual').eq('id', hose.tanque_id).single();
+        if (tank) {
+          const novoNivel = Math.max(0, tank.nivel_actual - litrosVendidos);
+          await supabase.from('tanks').update({ nivel_actual: novoNivel }).eq('id', hose.tanque_id);
+        }
+      }
+    }
+
     setShift(null); setCashEntries([]); setShiftOrders([]); setHoseReadings({}); setFinalReadings({});
     setShowRecon(false); setClosingShift(false);
     alert("✅ Turno fechado com sucesso!");
@@ -2985,7 +3051,325 @@ function OperatorApp({ user, profile, onLogout }) {
   );
 }
 
-function HosesAdmin() {
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN — TANQUES & STOCK
+// ════════════════════════════════════════════════════════════════════════════
+function TanquesAdmin() {
+  const [tanks, setTanks]           = useState([]);
+  const [deliveries, setDeliveries] = useState([]);
+  const [hoses, setHoses]           = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [view, setView]             = useState("tanques"); // tanques | abastecimentos
+  const [modal, setModal]           = useState(null);      // null | "tank" | "delivery" | "link"
+  const [form, setForm]             = useState({});
+  const [saving, setSaving]         = useState(false);
+
+  const COMBUSTIVEIS = ["Gasolina","Diesel","Petróleo","Óleo Motor"];
+  const CORES = ["#f59e0b","#3b82f6","#8b5cf6","#10b981","#f43f5e","#06b6d4","#f97316"];
+
+  useEffect(() => { load(); }, []);
+
+  const load = async () => {
+    setLoading(true);
+    const [{ data: t }, { data: d }, { data: h }] = await Promise.all([
+      supabase.from('tanks').select('*').order('nome'),
+      supabase.from('tank_deliveries').select('*, tanks(nome,combustivel,cor)').order('data', {ascending:false}).limit(50),
+      supabase.from('hoses').select('*, tanks(nome)').order('numero'),
+    ]);
+    setTanks(t||[]); setDeliveries(d||[]); setHoses(h||[]);
+    setLoading(false);
+  };
+
+  // ── Guardar tanque ─────────────────────────────────────────────────────
+  const saveTank = async () => {
+    if (!form.nome || !form.capacidade) return;
+    setSaving(true);
+    const payload = { nome: form.nome, combustivel: form.combustivel||"Gasolina", capacidade: parseFloat(form.capacidade)||0, nivel_actual: parseFloat(form.nivel_actual)||0, cor: form.cor||"#f59e0b", activo: true };
+    if (form.id) await supabase.from('tanks').update(payload).eq('id', form.id);
+    else         await supabase.from('tanks').insert(payload);
+    setSaving(false); setModal(null); load();
+  };
+
+  // ── Registar abastecimento ────────────────────────────────────────────
+  const saveDelivery = async () => {
+    if (!form.tanque_id || !form.litros) return;
+    setSaving(true);
+    const litros = parseFloat(form.litros)||0;
+    // Inserir abastecimento
+    await supabase.from('tank_deliveries').insert({
+      tanque_id: parseInt(form.tanque_id),
+      data: form.data || new Date().toISOString().split("T")[0],
+      litros, fornecedor: form.fornecedor||"", guia_num: form.guia_num||"", notas: form.notas||"",
+    });
+    // Actualizar nível do tanque
+    const tank = tanks.find(t => t.id === parseInt(form.tanque_id));
+    if (tank) {
+      const novoNivel = Math.min(tank.nivel_actual + litros, tank.capacidade);
+      await supabase.from('tanks').update({ nivel_actual: novoNivel }).eq('id', tank.id);
+    }
+    setSaving(false); setModal(null); load();
+  };
+
+  // ── Ligar mangueira a tanque ──────────────────────────────────────────
+  const saveHoseLink = async () => {
+    await supabase.from('hoses').update({ tanque_id: form.tanque_id ? parseInt(form.tanque_id) : null }).eq('id', form.hose_id);
+    setModal(null); load();
+  };
+
+  const deleteTank = async (id) => {
+    if (!window.confirm("Eliminar tanque?")) return;
+    await supabase.from('tanks').delete().eq('id', id); load();
+  };
+
+  // Calcular nível real: nivel_actual (base) + abastecimentos - litros vendidos por hose_readings
+  const calcNivelReal = async (tankId) => {
+    const { data: hrs } = await supabase
+      .from('hose_readings')
+      .select('leitura_inicial, leitura_final, hoses!inner(tanque_id)')
+      .eq('hoses.tanque_id', tankId)
+      .not('leitura_final', 'is', null);
+    return (hrs||[]).reduce((s,r) => s + Math.max(0,(r.leitura_final||0)-(r.leitura_inicial||0)), 0);
+  };
+
+  const pct = (nivel, cap) => cap > 0 ? Math.min(100, (nivel/cap)*100) : 0;
+  const nivelColor = (p) => p > 50 ? "#34d399" : p > 25 ? "#f59e0b" : "#f87171";
+
+  if (loading) return <div style={{padding:"2rem",textAlign:"center",color:"#475569"}}>A carregar...</div>;
+
+  return (
+    <div>
+      <PageHeader title="Tanques & Stock" sub="Gestão de níveis de combustível e abastecimentos"/>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:"6px",marginBottom:"1.5rem",background:"rgba(255,255,255,0.03)",padding:"4px",borderRadius:"12px",width:"fit-content"}}>
+        {[["tanques","⛽ Tanques"],["abastecimentos","🚛 Abastecimentos"],["mangueiras","🔗 Ligar Mangueiras"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setView(v)} style={{padding:"0.5rem 1rem",borderRadius:"9px",border:"none",background:view===v?"linear-gradient(135deg,#f59e0b,#d97706)":"transparent",color:view===v?"#000":"#475569",fontWeight:view===v?700:400,fontSize:"0.82rem",cursor:"pointer",fontFamily:"inherit"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TANQUES ── */}
+      {view==="tanques" && (
+        <div>
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"1rem"}}>
+            <Btn onClick={()=>{setForm({combustivel:"Gasolina",cor:"#f59e0b"});setModal("tank");}} icon="plus">Novo Tanque</Btn>
+          </div>
+
+          {tanks.length===0&&<div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhum tanque. Clica em "Novo Tanque" para começar.</div>}
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:"1rem"}}>
+            {tanks.map(t => {
+              const p      = pct(t.nivel_actual, t.capacidade);
+              const cor    = nivelColor(p);
+              const hosesDoTanque = hoses.filter(h => h.tanque_id === t.id);
+              return (
+                <div key={t.id} style={{background:"linear-gradient(145deg,#0d1b2e,#091422)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"16px",padding:"1.4rem",position:"relative",overflow:"hidden"}}>
+                  {/* Fundo de nível */}
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,height:`${p}%`,background:`${t.cor||cor}08`,transition:"height 0.5s ease",pointerEvents:"none"}}/>
+
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1rem",position:"relative"}}>
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}}>
+                        <div style={{width:"10px",height:"10px",borderRadius:"50%",background:t.cor||"#f59e0b"}}/>
+                        <span style={{color:"#f1f5f9",fontWeight:700,fontSize:"0.95rem"}}>{t.nome}</span>
+                      </div>
+                      <span style={{color:"#475569",fontSize:"0.75rem"}}>{t.combustivel}</span>
+                    </div>
+                    <div style={{display:"flex",gap:"5px"}}>
+                      <IconBtn onClick={()=>{setForm({...t});setModal("tank");}} icon="edit" color="#f59e0b"/>
+                      <IconBtn onClick={()=>deleteTank(t.id)} icon="trash" color="#f87171"/>
+                    </div>
+                  </div>
+
+                  {/* Gauge */}
+                  <div style={{marginBottom:"1rem",position:"relative"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                      <span style={{color:cor,fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.4rem"}}>{fmt(t.nivel_actual)} L</span>
+                      <span style={{color:"#334155",fontSize:"0.75rem"}}>de {fmt(t.capacidade)} L</span>
+                    </div>
+                    <div style={{height:"10px",background:"rgba(255,255,255,0.05)",borderRadius:"999px",overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${p}%`,background:`linear-gradient(90deg,${t.cor||cor},${t.cor||cor}cc)`,borderRadius:"999px",transition:"width 0.5s ease",boxShadow:`0 0 8px ${t.cor||cor}60`}}/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:"5px"}}>
+                      <span style={{color:cor,fontSize:"0.72rem",fontWeight:600}}>{p.toFixed(1)}% cheio</span>
+                      <span style={{color:"#334155",fontSize:"0.72rem"}}>Livre: {fmt(t.capacidade - t.nivel_actual)} L</span>
+                    </div>
+                  </div>
+
+                  {/* Mangueiras ligadas */}
+                  {hosesDoTanque.length > 0 && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"5px",marginBottom:"0.8rem"}}>
+                      {hosesDoTanque.map(h=>(
+                        <span key={h.id} style={{padding:"2px 8px",borderRadius:"6px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",color:"#475569",fontSize:"0.7rem"}}>{h.nome}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Alerta nível baixo */}
+                  {p <= 25 && (
+                    <div style={{padding:"0.5rem 0.7rem",background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:"8px",color:"#f87171",fontSize:"0.75rem",fontWeight:600}}>
+                      ⚠️ Nível {p<=10?"crítico":"baixo"} — considerar abastecimento
+                    </div>
+                  )}
+
+                  {/* Botão abastecer */}
+                  <button onClick={()=>{setForm({tanque_id:t.id,data:new Date().toISOString().split("T")[0]});setModal("delivery");}}
+                    style={{width:"100%",marginTop:"0.8rem",padding:"0.5rem",background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.2)",borderRadius:"9px",color:"#f59e0b",cursor:"pointer",fontSize:"0.78rem",fontWeight:600,fontFamily:"inherit",position:"relative"}}>
+                    🚛 Registar Abastecimento
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── ABASTECIMENTOS ── */}
+      {view==="abastecimentos" && (
+        <div>
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"1rem"}}>
+            <Btn onClick={()=>{setForm({data:new Date().toISOString().split("T")[0]});setModal("delivery");}} icon="plus">Novo Abastecimento</Btn>
+          </div>
+          <Card>
+            {deliveries.length===0 ? <div style={{padding:"3rem",textAlign:"center",color:"#475569"}}>Nenhum abastecimento registado.</div> : (
+              <Table headers={["Data","Tanque","Litros","Fornecedor","Guia Nº","Notas"]}>
+                {deliveries.map(d=>(
+                  <TR key={d.id}>
+                    <TD muted>{fmtDate(d.data)}</TD>
+                    <TD><div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+                      <div style={{width:"8px",height:"8px",borderRadius:"50%",background:d.tanks?.cor||"#f59e0b"}}/>
+                      <span style={{fontWeight:600}}>{d.tanks?.nome||"—"}</span>
+                    </div></TD>
+                    <TD><span style={{color:"#34d399",fontWeight:700,fontFamily:"'Syne',sans-serif"}}>+{fmt(d.litros)} L</span></TD>
+                    <TD muted>{d.fornecedor||"—"}</TD>
+                    <TD muted>{d.guia_num||"—"}</TD>
+                    <TD muted>{d.notas||"—"}</TD>
+                  </TR>
+                ))}
+              </Table>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── LIGAR MANGUEIRAS ── */}
+      {view==="mangueiras" && (
+        <div>
+          <div style={{padding:"0.8rem 1rem",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"12px",marginBottom:"1.2rem",color:"#60a5fa",fontSize:"0.8rem",lineHeight:1.7}}>
+            ℹ️ Liga cada mangueira ao seu tanque. Isto permite calcular automaticamente o stock consumido por tanque com base nas leituras dos contadores.
+          </div>
+          <Card>
+            <Table headers={["Mangueira","Combustível","Tanque Ligado","Acção"]}>
+              {hoses.map(h=>(
+                <TR key={h.id}>
+                  <TD bold>{h.nome}</TD>
+                  <TD muted>{h.combustivel}</TD>
+                  <TD>
+                    {h.tanks ? (
+                      <span style={{color:"#34d399",fontWeight:600,fontSize:"0.82rem"}}>✓ {h.tanks.nome}</span>
+                    ) : (
+                      <span style={{color:"#334155",fontSize:"0.82rem"}}>Não ligada</span>
+                    )}
+                  </TD>
+                  <TD>
+                    <select value={h.tanque_id||""} onChange={async e=>{
+                      await supabase.from('hoses').update({tanque_id:e.target.value?parseInt(e.target.value):null}).eq('id',h.id);
+                      load();
+                    }} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"8px",color:"#e2e8f0",padding:"4px 8px",fontSize:"0.78rem",fontFamily:"inherit",outline:"none",cursor:"pointer"}}>
+                      <option value="">— Sem tanque —</option>
+                      {tanks.filter(t=>t.combustivel===h.combustivel||true).map(t=>(
+                        <option key={t.id} value={t.id}>{t.nome} ({t.combustivel})</option>
+                      ))}
+                    </select>
+                  </TD>
+                </TR>
+              ))}
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {/* ── MODAL TANQUE ── */}
+      {modal==="tank" && (
+        <Modal title={form.id?"Editar Tanque":"Novo Tanque"} onClose={()=>setModal(null)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Nome *"><Input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="ex: Tanque A"/></Field>
+            <Field label="Combustível">
+              <Select value={form.combustivel||"Gasolina"} onChange={e=>setForm(f=>({...f,combustivel:e.target.value}))}>
+                {COMBUSTIVEIS.map(c=><option key={c} value={c}>{c}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Capacidade total (L) *">
+              <Input type="number" step="0.01" value={form.capacidade||""} onChange={e=>setForm(f=>({...f,capacidade:e.target.value}))} placeholder="ex: 30000"/>
+            </Field>
+            <Field label="Nível actual (L)">
+              <Input type="number" step="0.01" value={form.nivel_actual||""} onChange={e=>setForm(f=>({...f,nivel_actual:e.target.value}))} placeholder="ex: 15000"/>
+              <div style={{color:"#334155",fontSize:"0.7rem",marginTop:"4px"}}>Nível real hoje. Actualizado automaticamente.</div>
+            </Field>
+          </div>
+          <Field label="Cor">
+            <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+              {CORES.map(c=>(
+                <button key={c} onClick={()=>setForm(f=>({...f,cor:c}))}
+                  style={{width:"32px",height:"32px",borderRadius:"8px",background:c,border:`2px solid ${form.cor===c?"#fff":"transparent"}`,cursor:"pointer"}}/>
+              ))}
+            </div>
+          </Field>
+          <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1rem"}}>
+            <Btn onClick={()=>setModal(null)} variant="secondary">Cancelar</Btn>
+            <Btn onClick={saveTank} icon="save" disabled={saving}>{saving?"A guardar...":"Guardar"}</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── MODAL ABASTECIMENTO ── */}
+      {modal==="delivery" && (
+        <Modal title="Registar Abastecimento" onClose={()=>setModal(null)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Tanque *">
+              <Select value={form.tanque_id||""} onChange={e=>setForm(f=>({...f,tanque_id:e.target.value}))}>
+                <option value="">— Seleccionar —</option>
+                {tanks.map(t=>{
+                  const p = pct(t.nivel_actual, t.capacidade);
+                  return <option key={t.id} value={t.id}>{t.nome} — {p.toFixed(0)}% ({fmt(t.nivel_actual)} L)</option>;
+                })}
+              </Select>
+            </Field>
+            <Field label="Data *">
+              <Input type="date" value={form.data||""} onChange={e=>setForm(f=>({...f,data:e.target.value}))}/>
+            </Field>
+          </div>
+          <Field label="Litros recebidos *">
+            <Input type="number" step="0.01" value={form.litros||""} onChange={e=>setForm(f=>({...f,litros:e.target.value}))} placeholder="ex: 15000"/>
+            {form.tanque_id && form.litros && (() => {
+              const t = tanks.find(t=>t.id===parseInt(form.tanque_id));
+              if (!t) return null;
+              const novoNivel = Math.min(t.nivel_actual + (parseFloat(form.litros)||0), t.capacidade);
+              const novoPct   = pct(novoNivel, t.capacidade);
+              return <div style={{color:"#34d399",fontSize:"0.72rem",marginTop:"4px"}}>
+                Após abastecimento: {fmt(novoNivel)} L ({novoPct.toFixed(0)}%)
+              </div>;
+            })()}
+          </Field>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
+            <Field label="Fornecedor"><Input value={form.fornecedor||""} onChange={e=>setForm(f=>({...f,fornecedor:e.target.value}))} placeholder="ex: Petromoc"/></Field>
+            <Field label="Nº Guia"><Input value={form.guia_num||""} onChange={e=>setForm(f=>({...f,guia_num:e.target.value}))} placeholder="ex: GR-2024-001"/></Field>
+          </div>
+          <Field label="Notas"><Input value={form.notas||""} onChange={e=>setForm(f=>({...f,notas:e.target.value}))} placeholder="Observações opcionais"/></Field>
+          <div style={{display:"flex",gap:"0.8rem",justifyContent:"flex-end",marginTop:"1rem"}}>
+            <Btn onClick={()=>setModal(null)} variant="secondary">Cancelar</Btn>
+            <Btn onClick={saveDelivery} icon="save" disabled={saving||!form.tanque_id||!form.litros}>{saving?"A guardar...":"Guardar"}</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
   const [hoses, setHoses]     = useState([]);
   const [modal, setModal]     = useState(false);
   const [form, setForm]       = useState({});
@@ -3436,6 +3820,7 @@ export default function App() {
   const [payments, setPayments]         = useState([]);
   const [priceHistory, setPriceHistory] = useState([]);
   const [invoices, setInvoices]         = useState([]);
+  const [tanks, setTanks]               = useState([]);
   const [sideOpen, setSideOpen]         = useState(true);
   const [payPreClient, setPayPreClient] = useState(null);
   const [loading, setLoading]           = useState(true);
@@ -3444,16 +3829,18 @@ export default function App() {
   const loadAll = async () => {
     setLoading(true); setError(null);
     try {
-      const [ {data:cls,error:e1},{data:prds,error:e2},{data:ords,error:e3},{data:pays,error:e4},{data:hist,error:e5},{data:invs,error:e6} ] = await Promise.all([
+      const [ {data:cls,error:e1},{data:prds,error:e2},{data:ords,error:e3},{data:pays,error:e4},{data:hist,error:e5},{data:invs,error:e6},{data:tnks,error:e7} ] = await Promise.all([
         supabase.from('clients').select('*').order('nome'),
         supabase.from('products').select('*').order('nome'),
         supabase.from('orders').select('*').order('data',{ascending:false}),
         supabase.from('payments').select('*').order('data',{ascending:false}),
         supabase.from('price_history').select('*').order('data',{ascending:false}),
         supabase.from('invoices').select('*').order('emitida_em',{ascending:false}),
+        supabase.from('tanks').select('*').order('nome'),
       ]);
       if (e1||e2||e3||e4||e5||e6) throw (e1||e2||e3||e4||e5||e6);
-      setClients(cls||[]); setProducts(prds||[]); setOrders(ords||[]); setPayments(pays||[]); setPriceHistory(hist||[]); setInvoices(invs||[]);
+      setClients(cls||[]); setProducts(prds||[]); setOrders(ords||[]); setPayments(pays||[]);
+      setPriceHistory(hist||[]); setInvoices(invs||[]); setTanks(tnks||[]);
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
   };
@@ -3590,16 +3977,17 @@ export default function App() {
   const totalDivida = clients.reduce((s,c)=>{const{saldo}=calcSaldo(c.id,orders,payments);return saldo<0?s+Math.abs(saldo):s;},0);
 
   const navItems = [
-    {id:"dashboard",label:"Dashboard",         icon:"dashboard"},
-    {id:"clients",  label:"Clientes",          icon:"clients"},
-    {id:"payments", label:"Pagamentos",        icon:"payments"},
-    {id:"faturas",  label:"Faturas",           icon:"file"},
-    {id:"products", label:"Produtos & Preços", icon:"products"},
-    {id:"orders",   label:"Pedidos",           icon:"orders"},
-    {id:"turnos",   label:"Turnos",            icon:"history"},
-    {id:"mangueiras",label:"Mangueiras",       icon:"fuel"},
-    {id:"users",    label:"Utilizadores",      icon:"clients"},
-    {id:"reports",  label:"Relatórios",        icon:"reports"},
+    {id:"dashboard", label:"Dashboard",         icon:"dashboard"},
+    {id:"clients",   label:"Clientes",          icon:"clients"},
+    {id:"payments",  label:"Pagamentos",        icon:"payments"},
+    {id:"faturas",   label:"Faturas",           icon:"file"},
+    {id:"products",  label:"Produtos & Preços", icon:"products"},
+    {id:"orders",    label:"Pedidos",           icon:"orders"},
+    {id:"tanques",   label:"Tanques & Stock",   icon:"fuel"},
+    {id:"turnos",    label:"Turnos",            icon:"history"},
+    {id:"mangueiras",label:"Mangueiras",        icon:"fuel"},
+    {id:"users",     label:"Utilizadores",      icon:"clients"},
+    {id:"reports",   label:"Relatórios",        icon:"reports"},
   ];
 
   if (loading) return (
@@ -3681,13 +4069,14 @@ export default function App() {
       </aside>
 
       <main style={{flex:1,padding:"2rem 2.2rem",overflowX:"auto",minWidth:0,background:"#060d18"}}>
-        {view==="dashboard"  &&<Dashboard    orders={orders} clients={clients} products={products} payments={payments} onNavTo={navTo}/>}
+        {view==="dashboard"  &&<Dashboard    orders={orders} clients={clients} products={products} payments={payments} tanks={tanks} onNavTo={navTo}/>}
         {view==="clients"    &&<Clients      clients={clients} orders={orders} payments={payments} onSave={saveClient} onDelete={delClient} onNavTo={navTo}/>}
         {view==="payments"   &&<Payments     payments={payments} clients={clients} orders={orders} invoices={invoices} onSave={savePayment} onDelete={delPayment} preSelectedClient={payPreClient}/>}
         {view==="products"   &&<Products     products={products} onSave={saveProduct} onDelete={delProduct} priceHistory={priceHistory} onPriceChange={addPriceH}/>}
         {view==="orders"     &&<Orders       orders={orders} clients={clients} products={products} payments={payments} onSave={saveOrder} onDelete={delOrder}/>}
         {view==="reports"    &&<Reports      orders={orders} clients={clients} products={products} payments={payments}/>}
         {view==="faturas"    &&<Faturas      clients={clients} orders={orders} products={products} payments={payments} invoices={invoices} onSave={saveInvoice} onDelete={delInvoice}/>}
+        {view==="tanques"    &&<TanquesAdmin/>}
         {view==="turnos"     &&<TurnosAdmin/>}
         {view==="mangueiras" &&<HosesAdmin/>}
         {view==="users"      &&<UsersAdmin   currentUser={user}/>}
