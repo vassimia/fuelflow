@@ -1,0 +1,71 @@
+# FuelFlow v2 — Guia de instalação
+
+App de gestão da Estação de Serviço Quelimane: turnos e leituras das bombas, lançamentos a crédito, pagamentos, faturas, tanques e stock.
+
+- **Admin** (computador): painel, turnos, clientes e extratos, faturas, stock, relatórios, configuração.
+- **Operador** (telemóvel): abre o turno com os contadores herdados do fecho anterior, regista lançamentos a crédito e outras vendas, e fecha o turno com os valores entregues.
+
+---
+
+## 1. Base de dados (Supabase)
+
+1. Em [supabase.com/dashboard](https://supabase.com/dashboard) cria um projecto novo (ex.: `fuelflow-v2`, região West EU).
+2. Abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
+3. Vai a **Authentication → Sign In / Providers → Email** e **desliga "Confirm email"**. Sem isto, os operadores não conseguem entrar.
+4. Em **Project Settings → API**, copia o **Project URL** e a chave **anon public**.
+
+> A chave `service_role` nunca é usada pelo app. Não a coloques no Vercel.
+
+## 2. Publicar (Vercel)
+
+1. No projecto do Vercel, vai a **Settings → Environment Variables** e cria:
+   - `VITE_SUPABASE_URL` = o Project URL
+   - `VITE_SUPABASE_ANON_KEY` = a chave anon public
+2. Faz **Redeploy**.
+
+Para testar no teu computador: copia `.env.example` para `.env`, preenche, e corre `npm install` e `npm run dev`.
+
+## 3. Primeiro arranque
+
+1. Abre o app. Como ainda não há utilizadores, aparece **Criar conta de administrador**. Essa primeira conta fica com acesso total.
+2. Em **Configuração**:
+   - **Empresa**: NUIT, contacto e dados bancários (aparecem nas faturas e extratos).
+   - **Produtos e preços**: põe os preços da Gasolina e do Gasóleo e acrescenta lubrificantes, se venderes.
+3. Em **Tanques e stock → Novo tanque**: um por tanque, com a capacidade e o nível medido hoje.
+4. Em **Configuração → Bombas e mangueiras**: uma por mangueira, com o produto, o tanque de onde sai e o **contador actual** (o número que a bomba mostra).
+5. Em **Configuração → Utilizadores → Novo operador**: nome, nome de utilizador e senha. O operador entra no telemóvel com esse nome de utilizador.
+6. Em **Clientes → Novo cliente**: as empresas que abastecem a crédito, com o limite de crédito.
+
+## Como funciona
+
+**Turno**: o operador escolhe as mangueiras. As leituras iniciais são as finais do turno anterior e não podem ser alteradas. No fecho escreve as leituras finais e os valores entregues (numerário, M-Pesa, e-Mola, POS e despesas). O app calcula:
+
+> A entregar = vendas nas bombas + outras vendas − lançamentos a crédito de combustível
+> Diferença = entregue − a entregar
+
+Ao fechar, os contadores das mangueiras e o stock dos tanques são actualizados. O admin **valida** o turno ou **reabre-o** para corrigir. Só pode reabrir o último turno de cada mangueira.
+
+**Crédito**: cada lançamento fica no extrato do cliente. Os pagamentos baixam o saldo. **Emitir fatura** junta os lançamentos ainda não faturados de um período (numeração `FT 2026/0001`…). Extratos e faturas imprimem-se ou guardam-se em PDF com o botão Imprimir.
+
+**Stock**: o nível desce com cada turno fechado e sobe com cada recepção. As **medições** (vareta) mostram a diferença entre o tanque e o sistema e podem corrigir o nível.
+
+**Senhas**: o admin define a senha de qualquer operador em Configuração → Utilizadores. Se o admin perder a própria senha, corre no SQL Editor do Supabase:
+
+```sql
+update auth.users
+set encrypted_password = extensions.crypt('NOVA_SENHA', extensions.gen_salt('bf'))
+where email = 'o-teu-email@gmail.com';
+```
+
+## Segurança
+
+- Os operadores só vêem os seus turnos e só alteram o turno que têm aberto.
+- O preço dos lançamentos do operador é sempre o preço actual do produto; só o admin o pode mudar.
+- Novas contas criadas fora do app ficam inactivas até o admin as activar.
+
+## Ficheiros
+
+- `supabase/schema.sql`: base de dados completa (tabelas, regras de acesso, funções de turno e fatura).
+- `supabase/test/`: testes locais do schema. **Não** correr `mock_supabase.sql` no Supabase real.
+- `src/admin/`: ecrãs do administrador.
+- `src/operator/`: app do operador.
