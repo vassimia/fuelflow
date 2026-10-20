@@ -10,7 +10,9 @@ export default function Login() {
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   useEffect(() => {
-    supabase.rpc('has_users').then(({ data, error }) => setHasUsers(error ? true : !!data))
+    supabase.rpc('has_users').then(({ data, error }) => {
+      if (error) { setErr(traduzErro(error.message)); setHasUsers(true) } else setHasUsers(!!data)
+    })
   }, [])
 
   async function entrar(e) {
@@ -34,7 +36,11 @@ export default function Login() {
       const { data, error } = await supabase.auth.signUp({
         email: form.user.trim(), password: form.password, options: { data: { nome: form.nome.trim() } },
       })
-      if (error) throw new Error(traduzErro(error.message))
+      if (error) {
+        if (error.message.toLowerCase().includes('already registered'))
+          throw new Error('Este email já tem conta no Supabase (do app antigo). Usa o ficheiro supabase/admin.sql para a tornar admin, ou usa outro email.')
+        throw new Error(traduzErro(error.message))
+      }
       if (!data.session) {
         const r = await supabase.auth.signInWithPassword({ email: form.user.trim(), password: form.password })
         if (r.error) throw new Error(traduzErro(r.error.message))

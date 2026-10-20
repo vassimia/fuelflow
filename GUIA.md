@@ -9,10 +9,12 @@ App de gestão da Estação de Serviço Quelimane: turnos e leituras das bombas,
 
 ## 1. Base de dados (Supabase)
 
-1. Em [supabase.com/dashboard](https://supabase.com/dashboard) cria um projecto novo (ex.: `fuelflow-v2`, região West EU).
-2. Abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
-3. Vai a **Authentication → Sign In / Providers → Email** e **desliga "Confirm email"**. Sem isto, os operadores não conseguem entrar.
-4. Em **Project Settings → API**, copia o **Project URL** e a chave **anon public**.
+O FuelFlow v2 usa o **mesmo projecto Supabase** do app antigo (`xsvdgggdgiibqcfaozzs`), mas guarda tudo num schema separado chamado `fuelflow`. As tabelas e os dados do app antigo (schema `public`) não são tocados.
+
+1. No Supabase, abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
+2. Vai a **Project Settings → Data API → Exposed schemas**, acrescenta `fuelflow` e clica **Save**.
+3. **Conta de admin.** O teu email já tem conta no Supabase por causa do app antigo. Abre `supabase/admin.sql`, troca `MUDA_ESTA_SENHA` pela senha que queres, cola no SQL Editor e clica **Run**. Entras no app com `vassim` (ou o email) e essa senha.
+4. Em **Authentication → Sign In / Providers → Email**, confirma que **"Allow new users to sign up"** está ligado e **"Confirm email"** está desligado. Sem isto, os operadores não conseguem entrar.
 
 > A chave `service_role` nunca é usada pelo app. Não a coloques no Vercel.
 
@@ -21,13 +23,15 @@ App de gestão da Estação de Serviço Quelimane: turnos e leituras das bombas,
 1. No projecto do Vercel, vai a **Settings → Environment Variables** e cria:
    - `VITE_SUPABASE_URL` = o Project URL
    - `VITE_SUPABASE_ANON_KEY` = a chave anon public
+
+   Como é o mesmo projecto Supabase, estas variáveis já existem no Vercel do app antigo e não precisam de mudar.
 2. Faz **Redeploy**.
 
 Para testar no teu computador: copia `.env.example` para `.env`, preenche, e corre `npm install` e `npm run dev`.
 
 ## 3. Primeiro arranque
 
-1. Abre o app. Como ainda não há utilizadores, aparece **Criar conta de administrador**. Essa primeira conta fica com acesso total.
+1. Abre o app e entra com a conta de admin do passo 1.3.
 2. Em **Configuração**:
    - **Empresa**: NUIT, contacto e dados bancários (aparecem nas faturas e extratos).
    - **Produtos e preços**: põe os preços da Gasolina e do Gasóleo e acrescenta lubrificantes, se venderes.
