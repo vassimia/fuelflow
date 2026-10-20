@@ -256,10 +256,10 @@ function NewOperator({ admin, onClose, onSaved }) {
     const uid = data.user?.id
     if (!uid) throw new Error('Não foi possível criar o utilizador.')
     await q(supabase.from('profiles').update({ activo: true, nome: f.nome.trim() }).eq('id', uid))
+    await q(supabase.rpc('admin_confirm_user', { p_user_id: uid }))
     await signupClient.auth.signOut().catch(() => {})
     onSaved()
-    if (!data.session) return `Operador criado. Atenção: no Supabase, desliga "Confirm email" para ${f.nome.trim()} conseguir entrar.`
-    return 'Operador criado e activo'
+    return `Operador criado. ${f.nome.trim()} entra com "${username}".`
   }
   return (
     <FormModal title="Novo operador" onClose={onClose} onSubmit={save} submitLabel="Criar operador">

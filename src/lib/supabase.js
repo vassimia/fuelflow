@@ -31,6 +31,7 @@ export function traduzErro(msg = '') {
   if (m.includes('password should be at least')) return 'A senha deve ter pelo menos 6 caracteres.'
   if (m.includes('failed to fetch')) return 'Sem ligação à internet ou ao servidor.'
   if (m.includes('invalid schema') || m.includes('schema must be one of')) return 'O schema "fuelflow" não está exposto no Supabase. Vai a Project Settings → Data API → Exposed schemas e acrescenta "fuelflow".'
+  if (m.includes('rate limit')) return 'O Supabase limita quantas contas se criam por hora. Espera alguns minutos e tenta de novo.'
   if (m.includes('signups not allowed')) return 'O registo de contas está desligado no Supabase (Authentication → Sign In / Providers → Allow new users to sign up).'
   return msg
 }

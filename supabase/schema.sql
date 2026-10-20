@@ -100,8 +100,18 @@ begin
   if length(coalesce(p_password,'')) < 6 then raise exception 'A senha deve ter pelo menos 6 caracteres'; end if;
   update auth.users
      set encrypted_password = extensions.crypt(p_password, extensions.gen_salt('bf')),
+         email_confirmed_at = coalesce(email_confirmed_at, now()),
          updated_at = now()
    where id = p_user_id;
+end $$;
+
+-- Admin confirma a conta de um operador que acabou de criar (sem precisar do email de confirmação)
+create or replace function fuelflow.admin_confirm_user(p_user_id uuid)
+returns void language plpgsql security definer set search_path = fuelflow, extensions as $$
+begin
+  if not fuelflow.is_admin() then raise exception 'Apenas o admin pode confirmar contas'; end if;
+  if not exists (select 1 from fuelflow.profiles where id = p_user_id) then raise exception 'Utilizador não encontrado'; end if;
+  update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()), updated_at = now() where id = p_user_id;
 end $$;
 
 -- ----------------------------------------------------------------------------

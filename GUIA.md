@@ -14,7 +14,7 @@ O FuelFlow v2 usa o **mesmo projecto Supabase** do app antigo (`xsvdgggdgiibqcfa
 1. No Supabase, abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
 2. Vai a **Project Settings → Data API → Exposed schemas**, acrescenta `fuelflow` e clica **Save**.
 3. **Conta de admin.** O teu email já tem conta no Supabase por causa do app antigo. Abre `supabase/admin.sql`, troca `MUDA_ESTA_SENHA` pela senha que queres, cola no SQL Editor e clica **Run**. Entras no app com `vassim` (ou o email) e essa senha.
-4. Em **Authentication → Sign In / Providers → Email**, confirma que **"Allow new users to sign up"** está ligado e **"Confirm email"** está desligado. Sem isto, os operadores não conseguem entrar.
+4. Em **Authentication → Sign In / Providers**, **"Allow new users to sign up"** tem de estar ligado (é assim que o admin cria operadores). A confirmação por email pode ficar ligada: o app confirma sozinho as contas dos operadores.
 
 > A chave `service_role` nunca é usada pelo app. Não a coloques no Vercel.
 
