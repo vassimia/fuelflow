@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { loadShift, getHoses, getProducts, getClients, byId } from '../lib/refs.js'
+import { loadShift, getHoses, getProducts, getClients, getSides, byId } from '../lib/refs.js'
 import { mt, lt, n2, hm, dt, dtt, duration, today, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Btn, Field, Input, Select, Icon, Meter, Loading, ErrorNote, Empty, EstadoTag, Modal, useAction, useToast, confirmar } from '../components/ui.jsx'
 import { ShiftTotals, CashList } from '../components/ShiftReport.jsx'
 
 export default function OperatorApp({ profile, onLogout, onAdminMode }) {
   const { data, loading, error, reload } = useData(async () => {
-    const [open, hoses, products, clients, history] = await Promise.all([
+    const [open, hoses, products, clients, history, sides] = await Promise.all([
       q(supabase.from('shifts').select('*').eq('operador_id', profile.id).eq('estado', 'aberto').maybeSingle()),
       getHoses(), getProducts(), getClients(),
       q(supabase.from('shifts').select('*').eq('operador_id', profile.id).neq('estado', 'aberto').order('aberto_em', { ascending: false }).limit(8)),
+      getSides(),
     ])
-    return { open, hoses, products, clients, history }
+    return { open, hoses, products, clients, history, sides: byId(sides) }
   }, [profile.id])
   const [done, setDone] = useState(null)
 
@@ -21,13 +22,13 @@ export default function OperatorApp({ profile, onLogout, onAdminMode }) {
     <div className="op">
       <header className="op-head">
         <div className="brand-mark"><i /></div>
-        <div style={{ lineHeight: 1.2 }}><b>{profile.nome}</b><div style={{ fontSize: 12, color: '#A9B6C3' }}>{data?.open ? `Turno #${data.open.id} desde ${hm(data.open.aberto_em)}` : 'Sem turno aberto'}</div></div>
+        <div style={{ lineHeight: 1.2 }}><b>{profile.nome}</b><div style={{ fontSize: 12, color: '#A9B6C3' }}>{data?.open ? `${data.sides[data.open.side_id]?.nome || ''} · Turno #${data.open.id} desde ${hm(data.open.aberto_em)}` : 'Sem turno aberto'}</div></div>
         <div className="spacer" />
         {onAdminMode && <button className="btn small secondary" onClick={onAdminMode}>Admin</button>}
         <button className="btn small ghost" style={{ color: '#fff' }} onClick={onLogout} aria-label="Sair"><Icon name="logout" /></button>
       </header>
       {loading && !data ? <Loading /> : error ? <div className="op-body"><ErrorNote error={error} onRetry={reload} /></div>
-        : done ? <ClosedScreen shift={done} onOk={() => { setDone(null); reload() }} />
+        : done ? <ClosedScreen shift={done} side={data.sides[done.side_id]?.nome} onOk={() => { setDone(null); reload() }} />
         : data.open ? <OpenShift shiftId={data.open.id} refs={data} onClosed={(s) => setDone(s)} />
         : <StartShift refs={data} history={data.history} onOpened={reload} />}
     </div>
@@ -37,58 +38,80 @@ export default function OperatorApp({ profile, onLogout, onAdminMode }) {
 // ---------------------------------------------------------------- Abrir turno
 function StartShift({ refs, history, onOpened }) {
   const act = useAction()
-  const hoses = refs.hoses.filter(h => h.activo)
   const prod = byId(refs.products)
-  const [sel, setSel] = useState(() => new Set())
+  const status = useData(() => q(supabase.rpc('side_status')), [])
+  const [side, setSide] = useState(null)
   const [busy, setBusy] = useState(false)
-  const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const sides = status.data || []
+  const chosen = sides.find(s => s.side_id === side)
+  const hoses = refs.hoses.filter(h => h.activo && h.side_id === side)
   const bombas = [...new Set(hoses.map(h => h.bomba || ''))]
 
   async function abrir() {
     setBusy(true)
-    const ok = await act(() => q(supabase.rpc('open_shift', { p_hose_ids: [...sel] })), 'Turno aberto')
+    const ok = await act(() => q(supabase.rpc('open_shift', { p_side_id: side })), `Turno aberto no ${chosen?.nome}`)
     setBusy(false)
     if (ok) onOpened()
+    else status.reload()
   }
 
   return (
     <>
       <div className="op-body">
-        <div><h1>Abrir turno</h1><p className="muted" style={{ marginTop: 4 }}>Escolhe as mangueiras que vais atender. Confirma que o contador da bomba mostra o mesmo número.</p></div>
-        {hoses.length === 0 ? <Empty title="Ainda não há mangueiras">O administrador tem de registar as bombas e mangueiras primeiro.</Empty> : (
-          <>
-            <div className="row"><Btn small variant="secondary" onClick={() => setSel(new Set(hoses.map(h => h.id)))}>Escolher todas</Btn>
-              {sel.size > 0 && <Btn small variant="ghost" onClick={() => setSel(new Set())}>Limpar</Btn>}</div>
-            {bombas.map(b => (
-              <div key={b} className="stack" style={{ gap: 8 }}>
-                {b && <h3>{b}</h3>}
-                {hoses.filter(h => (h.bomba || '') === b).map(h => (
-                  <label key={h.id} className={`hose-pick ${sel.has(h.id) ? 'on' : ''}`}>
-                    <input type="checkbox" checked={sel.has(h.id)} onChange={() => toggle(h.id)} />
-                    <div style={{ flex: 1 }}>
-                      <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[h.product_id]?.cor }} /><b>{h.codigo}</b><span className="muted">{prod[h.product_id]?.nome}</span></div>
-                      <div style={{ marginTop: 6 }}><Meter value={h.leitura_actual} /></div>
+        <div><h1>Abrir turno</h1><p className="muted" style={{ marginTop: 4 }}>Escolhe o lado onde vais trabalhar. O turno abre com todas as mangueiras desse lado.</p></div>
+        <ErrorNote error={status.error} onRetry={status.reload} />
+        {status.loading && !status.data ? <Loading /> : sides.length === 0 ? <Empty title="Ainda não há lados configurados">O administrador tem de configurar as bombas primeiro.</Empty> : (
+          <div className="stack" style={{ gap: 10 }} role="radiogroup" aria-label="Lado">
+            {sides.map(s => {
+              const ocupado = !!s.turno_id
+              return (
+                <label key={s.side_id} className={`hose-pick ${side === s.side_id ? 'on' : ''} ${ocupado ? 'busy' : ''}`}>
+                  <input type="radio" name="lado" disabled={ocupado} checked={side === s.side_id} onChange={() => setSide(s.side_id)} />
+                  <div style={{ flex: 1 }}>
+                    <div className="row between"><b style={{ fontSize: 18 }}>{s.nome}</b><span className="muted">{s.mangueiras} mangueiras</span></div>
+                    <div className={ocupado ? 'neg' : 'pos'} style={{ fontSize: 14, marginTop: 2 }}>
+                      {ocupado ? `Ocupado: ${s.operador}, desde ${hm(s.aberto_em)}` : 'Livre'}
                     </div>
-                  </label>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+        )}
+
+        {side && (
+          <section className="stack" style={{ gap: 8 }}>
+            <p className="muted">Confirma que cada contador da bomba mostra este número:</p>
+            {bombas.map(b => (
+              <div key={b} className="reading" style={{ gap: 8 }}>
+                <b>{b}</b>
+                {hoses.filter(h => (h.bomba || '') === b).map(h => (
+                  <div key={h.id} className="row between">
+                    <span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[h.product_id]?.cor }} />{h.codigo} <span className="muted">{prod[h.product_id]?.nome}</span></span>
+                    <Meter value={h.leitura_actual} size="sm" />
+                  </div>
                 ))}
               </div>
             ))}
-          </>
+          </section>
         )}
+
         {history.length > 0 && (
           <section className="panel" style={{ marginTop: 10 }}>
             <div className="panel-head"><h3>Os meus últimos turnos</h3></div>
             <table className="t"><tbody>{history.map(s => {
               const d = Number(s.diferenca)
               return (
-                <tr key={s.id}><td><b>#{s.id}</b> <span className="muted">{dtt(s.aberto_em)}</span></td><td><EstadoTag estado={s.estado} /></td>
+                <tr key={s.id}><td><b>#{s.id}</b> <span className="muted">{sides.find(x => x.side_id === s.side_id)?.nome} · {dtt(s.aberto_em)}</span></td><td><EstadoTag estado={s.estado} /></td>
                   <td className={`right num ${d < 0 ? 'neg' : d > 0 ? 'pos' : ''}`}>{d === 0 ? 'Certo' : (d > 0 ? '+' : '') + mt(d)}</td></tr>
               )
             })}</tbody></table>
           </section>
         )}
       </div>
-      {hoses.length > 0 && <div className="op-foot"><div><Btn big disabled={!sel.size || busy} onClick={abrir}>{busy ? 'A abrir…' : sel.size ? `Abrir turno com ${sel.size} mangueira${sel.size > 1 ? 's' : ''}` : 'Escolhe as mangueiras'}</Btn></div></div>}
+      {sides.length > 0 && <div className="op-foot"><div>
+        <Btn big disabled={!side || busy || !hoses.length} onClick={abrir}>{busy ? 'A abrir…' : chosen ? `Abrir turno no ${chosen.nome}` : 'Escolhe o lado'}</Btn>
+      </div></div>}
     </>
   )
 }
@@ -310,7 +333,7 @@ function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed
         <p className="muted">Escreve o número que cada contador mostra agora.</p>
         {rows.map(r => (
           <div key={r.id} className="reading">
-            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[r.product_id]?.cor }} /><b>{hoses[r.hose_id]?.codigo}</b><span className="muted">{prod[r.product_id]?.nome} · {n2(r.preco)} MT/L</span></div>
+            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[r.product_id]?.cor }} /><b>{hoses[r.hose_id]?.codigo}</b><span className="muted">{hoses[r.hose_id]?.bomba} · {prod[r.product_id]?.nome} · {n2(r.preco)} MT/L</span></div>
             <div className="row between"><span className="muted">Inicial</span><Meter value={r.leitura_inicial} size="sm" /></div>
             <Field label="Final">
               <Input className="big num" inputMode="decimal" value={finals[r.id]} placeholder={n2(r.leitura_inicial)}
@@ -366,13 +389,14 @@ function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed
   )
 }
 
-function ClosedScreen({ shift, onOk }) {
+function ClosedScreen({ shift, side, onOk }) {
   const d = Number(shift.diferenca)
   return (
     <div className="op-body" style={{ justifyContent: 'center' }}>
       <div className="stack" style={{ textAlign: 'center', alignItems: 'center' }}>
         <div style={{ width: 64, height: 64, borderRadius: 32, background: 'var(--green-soft)', color: 'var(--green)', display: 'grid', placeItems: 'center' }}><Icon name="check" size={34} /></div>
         <h1>Turno #{shift.id} fechado</h1>
+        {side && <b>{side}</b>}
         <p className="muted">{dt(shift.aberto_em)} · {duration(shift.aberto_em, shift.fechado_em)}</p>
       </div>
       <div className="panel panel-body"><ShiftTotals totals={shift} /></div>

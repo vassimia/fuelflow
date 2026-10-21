@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { getProducts, getProfiles, getClients, getHoses, getTanks, byId } from '../lib/refs.js'
+import { getProducts, getProfiles, getClients, getHoses, getTanks, getSides, byId } from '../lib/refs.js'
 import { mt, lt, n2, dt, monthStart, today, toISODate, dayStart, dayEnd, downloadCSV } from '../lib/format.js'
 import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input } from '../components/ui.jsx'
 
@@ -10,12 +10,13 @@ const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, 
 export default function Reports() {
   const [per, setPer] = useState({ de: monthStart(), ate: today() })
   const { data, loading, error, reload } = useData(async () => {
-    const [products, profiles, clients, hoses, tanks, shifts, sales, payments, deliveries] = await Promise.all([
+    const [products, profiles, clients, hoses, tanks, shifts, sales, payments, deliveries, sides] = await Promise.all([
       getProducts(), getProfiles(), getClients(), getHoses(), getTanks(),
       q(supabase.from('shifts').select('*').neq('estado', 'aberto').gte('fechado_em', dayStart(per.de)).lte('fechado_em', dayEnd(per.ate))),
       q(supabase.from('credit_sales').select('client_id, product_id, quantidade, total').gte('data', per.de).lte('data', per.ate)),
       q(supabase.from('payments').select('client_id, valor').gte('data', per.de).lte('data', per.ate)),
       q(supabase.from('tank_deliveries').select('tank_id, quantidade').gte('data', per.de).lte('data', per.ate)),
+      getSides(),
     ])
     const ids = shifts.map(s => s.id)
     let readings = [], other = []
@@ -26,7 +27,7 @@ export default function Reports() {
       ])
       readings = readings.concat(r); other = other.concat(o)
     }
-    return { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries }
+    return { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides }
   }, [per.de, per.ate])
 
   const set = (k) => (e) => setPer(p => ({ ...p, [k]: e.target.value }))
@@ -42,7 +43,7 @@ export default function Reports() {
   if (loading && !data) return <div className="stack">{head}<Loading /></div>
   if (error) return <div className="stack">{head}<ErrorNote error={error} onRetry={reload} /></div>
 
-  const { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries } = data
+  const { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides } = data
   const prod = byId(products), prof = byId(profiles), cli = byId(clients), hose = byId(hoses)
   const tag = `${per.de}_${per.ate}`
 
@@ -64,6 +65,12 @@ export default function Reports() {
   })
   other.forEach(o => { const d = dayOf[o.shift_id]; porDia[d] = porDia[d] || { valor: 0, l: {} }; porDia[d].valor += Number(o.total) })
   const dias = Object.keys(porDia).sort()
+
+  // 2b. Por lado
+  const sideOf = Object.fromEntries(shifts.map(s => [s.id, s.side_id]))
+  const porLado = Object.fromEntries(sides.map(x => [x.id, { n: 0, vendas: 0, credito: 0, dif: 0, l: {} }]))
+  shifts.forEach(s => { const o = porLado[s.side_id]; if (!o) return; o.n++; o.vendas += Number(s.total_bomba) + Number(s.total_outras); o.credito += Number(s.total_credito); o.dif += Number(s.diferenca) })
+  readings.forEach(r => { const o = porLado[sideOf[r.shift_id]]; if (o) o.l[r.product_id] = (o.l[r.product_id] || 0) + Number(r.litros) })
 
   // 3. Por operador
   const porOp = {}
@@ -94,6 +101,13 @@ export default function Reports() {
         <div><div className="v">{mt(sales.reduce((a, s) => a + Number(s.total), 0))}</div><div className="l">Vendido a crédito</div></div>
         <div><div className="v">{shifts.length}</div><div className="l">Turnos fechados</div></div>
       </div>
+
+      <Section title="Por lado" onCSV={() => downloadCSV(`lados_${tag}.csv`, [['Lado', 'Turnos', ...fuels.map(p => p.nome + ' (L)'), 'Vendas', 'Crédito', 'Diferença'], ...sides.map(x => [x.nome, porLado[x.id].n, ...fuels.map(p => porLado[x.id].l[p.id] || 0), porLado[x.id].vendas, porLado[x.id].credito, porLado[x.id].dif])])}>
+        <table className="t"><thead><tr><th>Lado</th><th className="right">Turnos</th>{fuels.map(p => <th key={p.id} className="right">{p.nome}</th>)}<th className="right">Vendas</th><th className="right">Crédito</th><th className="right">Diferença</th></tr></thead>
+          <tbody>{sides.map(x => { const o = porLado[x.id]; return (
+            <tr key={x.id}><td><b>{x.nome}</b></td><td className="right num">{o.n}</td>{fuels.map(p => <td key={p.id} className="right num">{lt(o.l[p.id] || 0)}</td>)}
+              <td className="right num"><b>{mt(o.vendas)}</b></td><td className="right num">{mt(o.credito)}</td><td className={`right num ${o.dif < 0 ? 'neg' : ''}`}><b>{mt(o.dif)}</b></td></tr>) })}</tbody></table>
+      </Section>
 
       <Section title="Vendas por produto" onCSV={() => downloadCSV(`vendas_produto_${tag}.csv`, [['Produto', 'Quantidade', 'Unidade', 'Valor'], ...prodRows.map(([pid, v]) => [prod[pid]?.nome, v.qtd, prod[pid]?.unidade, v.valor])])}>
         {prodRows.length === 0 ? <Empty title="Sem vendas no período" /> : (

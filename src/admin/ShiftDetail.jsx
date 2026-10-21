@@ -1,6 +1,6 @@
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { loadShift, getHoses, getProducts, getClients, getProfiles, byId } from '../lib/refs.js'
+import { loadShift, getHoses, getProducts, getClients, getProfiles, getSides, byId } from '../lib/refs.js'
 import { mt, lt, n2, dtt, duration, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Loading, ErrorNote, Btn, EstadoTag, useAction, confirmar, printDoc } from '../components/ui.jsx'
 import { ShiftReadings, ShiftTotals, CashList } from '../components/ShiftReport.jsx'
@@ -8,8 +8,8 @@ import { ShiftReadings, ShiftTotals, CashList } from '../components/ShiftReport.
 export default function ShiftDetail({ id, go }) {
   const act = useAction()
   const { data, loading, error, reload } = useData(async () => {
-    const [s, hoses, products, clients, profiles] = await Promise.all([loadShift(id), getHoses(), getProducts(), getClients(), getProfiles()])
-    return { ...s, hoses: byId(hoses), products: byId(products), clients: byId(clients), profiles: byId(profiles) }
+    const [s, hoses, products, clients, profiles, sides] = await Promise.all([loadShift(id), getHoses(), getProducts(), getClients(), getProfiles(), getSides()])
+    return { ...s, hoses: byId(hoses), products: byId(products), clients: byId(clients), profiles: byId(profiles), sides: byId(sides) }
   }, [id])
 
   if (loading && !data) return <Loading />
@@ -39,7 +39,8 @@ export default function ShiftDetail({ id, go }) {
   }
 
   const operador = profiles[shift.operador_id]?.nome || '—'
-  const imprimir = () => printDoc(<ShiftDoc {...data} operador={operador} />)
+  const lado = data.sides[shift.side_id]?.nome || ''
+  const imprimir = () => printDoc(<ShiftDoc {...data} operador={operador} lado={lado} />)
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -47,7 +48,7 @@ export default function ShiftDetail({ id, go }) {
         <Btn variant="ghost" icon="back" onClick={() => go('turnos')}>Turnos</Btn>
         <div className="page-head" style={{ marginTop: 6 }}>
           <div>
-            <div className="row"><h1>Turno #{shift.id}</h1><EstadoTag estado={shift.estado} /></div>
+            <div className="row"><h1>{lado} · Turno #{shift.id}</h1><EstadoTag estado={shift.estado} /></div>
             <p>{operador} · {dtt(shift.aberto_em)}{shift.fechado_em ? ` até ${dtt(shift.fechado_em)}` : ' (em curso)'} · {duration(shift.aberto_em, shift.fechado_em)}</p>
           </div>
           <div className="spacer" />
@@ -126,13 +127,13 @@ export default function ShiftDetail({ id, go }) {
   )
 }
 
-function ShiftDoc({ shift, readings, credit, other, cash, totals, hoses, products, clients, operador }) {
+function ShiftDoc({ shift, readings, credit, other, cash, totals, hoses, products, clients, operador, lado }) {
   return (
     <div className="doc">
-      <div className="doc-head"><div><h1>Fecho de turno #{shift.id}</h1><div>{operador}</div></div>
+      <div className="doc-head"><div><h1>Fecho de turno #{shift.id} — {lado}</h1><div>{operador}</div></div>
         <div style={{ textAlign: 'right' }}>{dtt(shift.aberto_em)}<br />até {dtt(shift.fechado_em)}</div></div>
-      <table><thead><tr><th>Mangueira</th><th>Produto</th><th className="r">Inicial</th><th className="r">Final</th><th className="r">Litros</th><th className="r">Preço</th><th className="r">Valor</th></tr></thead>
-        <tbody>{readings.map(r => <tr key={r.id}><td>{hoses[r.hose_id]?.codigo}</td><td>{products[r.product_id]?.nome}</td>
+      <table><thead><tr><th>Bomba</th><th>Mangueira</th><th>Produto</th><th className="r">Inicial</th><th className="r">Final</th><th className="r">Litros</th><th className="r">Preço</th><th className="r">Valor</th></tr></thead>
+        <tbody>{readings.map(r => <tr key={r.id}><td>{hoses[r.hose_id]?.bomba}</td><td>{hoses[r.hose_id]?.codigo}</td><td>{products[r.product_id]?.nome}</td>
           <td className="r">{n2(r.leitura_inicial)}</td><td className="r">{n2(r.leitura_final)}</td><td className="r">{n2(r.litros)}</td><td className="r">{n2(r.preco)}</td><td className="r">{n2(r.valor)}</td></tr>)}</tbody></table>
       {credit.length > 0 && <table><thead><tr><th>Crédito — cliente</th><th>Req.</th><th>Matrícula</th><th className="r">Qtd</th><th className="r">Total</th></tr></thead>
         <tbody>{credit.map(c => <tr key={c.id}><td>{clients[c.client_id]?.nome}</td><td>{c.requisicao}</td><td>{c.matricula}</td><td className="r">{n2(c.quantidade)} {products[c.product_id]?.nome}</td><td className="r">{n2(c.total)}</td></tr>)}</tbody></table>}

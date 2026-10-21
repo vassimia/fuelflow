@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase, signupClient, q, traduzErro } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { getProducts, getTanks, getHoses, getProfiles, getSettings, byId } from '../lib/refs.js'
+import { getProducts, getTanks, getHoses, getProfiles, getSettings, getSides, byId } from '../lib/refs.js'
 import { mt, n2, dtt, parseNum, TIPOS_PRODUTO } from '../lib/format.js'
 import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input, Select, Textarea, FormModal, Tag, Meter, useAction, confirmar } from '../components/ui.jsx'
 
@@ -126,48 +126,97 @@ function ProductForm({ product, onClose, onSaved }) {
 function Hoses() {
   const [modal, setModal] = useState(null)
   const { data, loading, error, reload } = useData(async () => {
-    const [hoses, products, tanks, open] = await Promise.all([getHoses(), getProducts(), getTanks(),
+    const [hoses, products, tanks, sides, open] = await Promise.all([getHoses(), getProducts(), getTanks(), getSides(),
       q(supabase.from('shift_readings').select('hose_id, shifts!inner(estado)').eq('shifts.estado', 'aberto'))])
-    return { hoses, products, tanks, busy: new Set(open.map(r => r.hose_id)) }
+    return { hoses, products, tanks, sides, busy: new Set(open.map(r => r.hose_id)) }
   })
   if (loading && !data) return <Loading />
   if (error) return <ErrorNote error={error} onRetry={reload} />
   const prod = byId(data.products), tk = byId(data.tanks)
   return (
-    <div className="stack">
-      <div className="row"><p className="muted">O contador de cada mangueira é a leitura com que o próximo turno começa.</p><div className="spacer" />
+    <div className="stack" style={{ gap: 18 }}>
+      <div className="row"><p className="muted">Cada lado tem o seu fecho de turno. O contador de cada mangueira é a leitura com que o próximo turno desse lado começa.</p><div className="spacer" />
         <Btn icon="plus" onClick={() => setModal({ h: null })} disabled={!data.products.length}>Nova mangueira</Btn></div>
-      <section className="panel">
-        {data.hoses.length === 0 ? <Empty title="Ainda sem mangueiras" action={<Btn icon="plus" onClick={() => setModal({ h: null })}>Registar mangueira</Btn>}>Regista cada mangueira com o contador actual. É daqui que os turnos herdam a leitura inicial.</Empty> : (
-          <div className="table-wrap"><table className="t">
-            <thead><tr><th>Mangueira</th><th>Bomba</th><th>Produto</th><th>Tanque</th><th>Contador actual</th><th>Estado</th><th /></tr></thead>
-            <tbody>{data.hoses.map(h => (
-              <tr key={h.id}>
-                <td><b>{h.codigo}</b></td><td>{h.bomba}</td>
-                <td><span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[h.product_id]?.cor }} />{prod[h.product_id]?.nome}</span></td>
-                <td>{tk[h.tank_id]?.nome || <span className="muted">sem tanque</span>}</td>
-                <td><Meter value={h.leitura_actual} size="sm" /></td>
-                <td>{data.busy.has(h.id) ? <Tag kind="aberto">Em turno</Tag> : h.activo ? <Tag kind="validado">Activa</Tag> : <Tag>Inactiva</Tag>}</td>
-                <td className="right"><Btn small variant="ghost" icon="edit" onClick={() => setModal({ h })}>Editar</Btn></td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        )}
-      </section>
-      {modal && <HoseForm hose={modal.h} busy={modal.h && data.busy.has(modal.h.id)} products={data.products} tanks={data.tanks} onClose={() => setModal(null)} onSaved={reload} />}
+      {data.sides.map(side => {
+        const hs = data.hoses.filter(h => h.side_id === side.id)
+        const emTurno = hs.some(h => data.busy.has(h.id))
+        return (
+          <section key={side.id} className="panel">
+            <div className="panel-head">
+              <h2>{side.nome}</h2><span className="muted">{[...new Set(hs.map(h => h.bomba))].length} bombas · {hs.length} mangueiras</span>
+              <div className="spacer" />
+              {emTurno && <Tag kind="aberto">Turno aberto</Tag>}
+              <Btn small variant="secondary" onClick={() => setModal({ contadores: side })} disabled={!hs.length || emTurno}>Acertar contadores</Btn>
+            </div>
+            {hs.length === 0 ? <Empty title="Sem mangueiras neste lado" /> : (
+              <div className="table-wrap"><table className="t">
+                <thead><tr><th>Bomba</th><th>Mangueira</th><th>Produto</th><th>Tanque</th><th>Contador actual</th><th>Estado</th><th /></tr></thead>
+                <tbody>{hs.map(h => (
+                  <tr key={h.id}>
+                    <td>{h.bomba}</td><td><b>{h.codigo}</b></td>
+                    <td><span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[h.product_id]?.cor }} />{prod[h.product_id]?.nome}</span></td>
+                    <td>{tk[h.tank_id]?.nome || <span className="neg">sem tanque</span>}</td>
+                    <td><Meter value={h.leitura_actual} size="sm" /></td>
+                    <td>{data.busy.has(h.id) ? <Tag kind="aberto">Em turno</Tag> : h.activo ? <Tag kind="validado">Activa</Tag> : <Tag>Inactiva</Tag>}</td>
+                    <td className="right"><Btn small variant="ghost" icon="edit" onClick={() => setModal({ h })}>Editar</Btn></td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </section>
+        )
+      })}
+      {modal?.h !== undefined && <HoseForm hose={modal.h} busy={modal.h && data.busy.has(modal.h.id)} products={data.products} tanks={data.tanks} sides={data.sides} onClose={() => setModal(null)} onSaved={reload} />}
+      {modal?.contadores && <CountersForm side={modal.contadores} hoses={data.hoses.filter(h => h.side_id === modal.contadores.id)} products={prod} onClose={() => setModal(null)} onSaved={reload} />}
     </div>
   )
 }
 
-function HoseForm({ hose, busy, products, tanks, onClose, onSaved }) {
-  const [f, setF] = useState({ codigo: hose?.codigo || '', bomba: hose?.bomba || '', product_id: hose?.product_id || '', tank_id: hose?.tank_id || '', leitura_actual: hose?.leitura_actual ?? '', activo: hose?.activo ?? true, ordem: hose?.ordem ?? 0 })
+function CountersForm({ side, hoses, products, onClose, onSaved }) {
+  const [vals, setVals] = useState(() => Object.fromEntries(hoses.map(h => [h.id, String(h.leitura_actual)])))
+  async function save() {
+    const items = []
+    for (const h of hoses) {
+      const v = parseNum(vals[h.id])
+      if (v == null || v < 0) throw new Error(`Contador inválido em ${h.codigo}.`)
+      if (v !== Number(h.leitura_actual)) items.push({ id: h.id, leitura: v })
+    }
+    if (!items.length) return 'Nada mudou'
+    await q(supabase.rpc('set_hose_counters', { p_items: items }))
+    onSaved()
+    return `${items.length} contador${items.length > 1 ? 'es' : ''} actualizado${items.length > 1 ? 's' : ''}`
+  }
+  const bombas = [...new Set(hoses.map(h => h.bomba))]
+  return (
+    <FormModal title={`Acertar contadores — ${side.nome}`} onClose={onClose} onSubmit={save} submitLabel="Guardar contadores">
+      <p className="muted">Escreve o número que cada contador mostra agora. O próximo turno deste lado começa com estes valores.</p>
+      {bombas.map(b => (
+        <div key={b} className="stack" style={{ gap: 8 }}>
+          <h3>{b}</h3>
+          <div className="grid2">
+            {hoses.filter(h => h.bomba === b).map(h => (
+              <Field key={h.id} label={`${h.codigo} — ${products[h.product_id]?.nome || ''}`}>
+                <Input value={vals[h.id]} onChange={e => setVals(v => ({ ...v, [h.id]: e.target.value }))} inputMode="decimal" />
+              </Field>
+            ))}
+          </div>
+        </div>
+      ))}
+    </FormModal>
+  )
+}
+
+function HoseForm({ hose, busy, products, tanks, sides, onClose, onSaved }) {
+  const [f, setF] = useState({ side_id: hose?.side_id || '', codigo: hose?.codigo || '', bomba: hose?.bomba || '', product_id: hose?.product_id || '', tank_id: hose?.tank_id || '', leitura_actual: hose?.leitura_actual ?? '', activo: hose?.activo ?? true, ordem: hose?.ordem ?? 0 })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   const changedMeter = hose && parseNum(f.leitura_actual) !== Number(hose.leitura_actual)
+  const tankOptions = tanks.filter(t => String(t.side_id) === String(f.side_id) && String(t.product_id) === String(f.product_id))
   async function save() {
     const leitura = parseNum(f.leitura_actual)
     if (leitura == null || leitura < 0) throw new Error('Indica o contador actual da mangueira.')
-    if (busy && changedMeter) throw new Error('Esta mangueira está num turno aberto. Fecha o turno antes de mudar o contador.')
-    const row = { codigo: f.codigo.trim(), bomba: f.bomba.trim(), product_id: Number(f.product_id), tank_id: f.tank_id ? Number(f.tank_id) : null, leitura_actual: leitura, activo: f.activo, ordem: Number(f.ordem) || 0 }
+    if (busy && (changedMeter || String(f.side_id) !== String(hose.side_id))) throw new Error('Esta mangueira está num turno aberto. Fecha o turno antes de mudar o contador ou o lado.')
+    const tankOk = tankOptions.some(t => String(t.id) === String(f.tank_id))
+    const row = { side_id: Number(f.side_id), codigo: f.codigo.trim(), bomba: f.bomba.trim(), product_id: Number(f.product_id), tank_id: tankOk ? Number(f.tank_id) : null, leitura_actual: leitura, activo: f.activo, ordem: Number(f.ordem) || 0 }
     if (hose) await q(supabase.from('hoses').update(row).eq('id', hose.id))
     else await q(supabase.from('hoses').insert(row))
     onSaved()
@@ -176,20 +225,21 @@ function HoseForm({ hose, busy, products, tanks, onClose, onSaved }) {
   const fuel = products.filter(p => p.tipo === 'combustivel')
   return (
     <FormModal title={hose ? `Editar ${hose.codigo}` : 'Nova mangueira'} onClose={onClose} onSubmit={save}>
+      <Field label="Lado"><Select required value={f.side_id} onChange={set('side_id')}><option value="">Escolher…</option>{sides.map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</Select></Field>
       <div className="grid2">
-        <Field label="Código" hint="ex.: B1-M1"><Input required value={f.codigo} onChange={set('codigo')} /></Field>
-        <Field label="Bomba" hint="ex.: Bomba 1"><Input value={f.bomba} onChange={set('bomba')} /></Field>
+        <Field label="Bomba" hint="ex.: BOMBA 1"><Input required value={f.bomba} onChange={set('bomba')} /></Field>
+        <Field label="Código" hint="ex.: B1 - D"><Input required value={f.codigo} onChange={set('codigo')} /></Field>
       </div>
       <Field label="Produto"><Select required value={f.product_id} onChange={set('product_id')}><option value="">Escolher…</option>{fuel.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</Select></Field>
-      <Field label="Tanque de onde sai" hint="O stock deste tanque desce com os litros vendidos nesta mangueira">
-        <Select value={f.tank_id} onChange={set('tank_id')}><option value="">Sem tanque</option>
-          {tanks.filter(t => !f.product_id || t.product_id === Number(f.product_id)).map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}</Select>
+      <Field label="Tanque de onde sai" hint="Só aparecem tanques do mesmo lado e produto">
+        <Select value={tankOptions.some(t => String(t.id) === String(f.tank_id)) ? f.tank_id : ''} onChange={set('tank_id')}><option value="">Sem tanque</option>
+          {tankOptions.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}</Select>
       </Field>
       <Field label="Contador actual" hint={hose ? 'Só muda isto se o contador foi trocado ou reiniciado.' : 'O número que o contador da bomba mostra agora.'}>
         <Input required value={f.leitura_actual} onChange={set('leitura_actual')} inputMode="decimal" disabled={busy} />
       </Field>
       {changedMeter && <div className="note warn">O próximo turno vai começar com este contador em vez de {n2(hose.leitura_actual)}.</div>}
-      <Field label="Ordem"><Input type="number" value={f.ordem} onChange={set('ordem')} /></Field>
+      <Field label="Ordem" hint="Ordem em que aparece no fecho"><Input type="number" value={f.ordem} onChange={set('ordem')} /></Field>
       {hose && <label className="check"><input type="checkbox" checked={f.activo} onChange={set('activo')} />Mangueira em uso</label>}
     </FormModal>
   )

@@ -1,6 +1,7 @@
 import { supabase, q } from './supabase.js'
 
 export const getProducts = () => q(supabase.from('products').select('*').order('ordem').order('nome'))
+export const getSides = () => q(supabase.from('sides').select('*').order('ordem').order('nome'))
 export const getTanks = () => q(supabase.from('tanks').select('*').order('nome'))
 export const getHoses = () => q(supabase.from('hoses').select('*').order('ordem').order('codigo'))
 export const getClients = () => q(supabase.from('clients').select('*').order('nome'))

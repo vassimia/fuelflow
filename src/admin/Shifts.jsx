@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { getProfiles, byId } from '../lib/refs.js'
+import { getProfiles, getSides, byId } from '../lib/refs.js'
 import { mt, dtt, duration, addDays, today, downloadCSV , dayStart, dayEnd } from '../lib/format.js'
 import { PageHead, Loading, ErrorNote, Empty, Btn, EstadoTag, Field, Input, Select } from '../components/ui.jsx'
 
 export default function Shifts({ go }) {
-  const [f, setF] = useState({ de: addDays(today(), -14), ate: today(), estado: '', operador: '' })
+  const [f, setF] = useState({ de: addDays(today(), -14), ate: today(), estado: '', operador: '', lado: '' })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value }))
 
   const { data, loading, error, reload } = useData(async () => {
@@ -15,13 +15,16 @@ export default function Shifts({ go }) {
       .order('aberto_em', { ascending: false }).limit(500)
     if (f.estado) qq = qq.eq('estado', f.estado)
     if (f.operador) qq = qq.eq('operador_id', f.operador)
-    const [shifts, profiles, open] = await Promise.all([
-      q(qq), getProfiles(), q(supabase.from('shifts').select('*').eq('estado', 'aberto')),
+    if (f.lado) qq = qq.eq('side_id', f.lado)
+    const [shifts, profiles, open, sides] = await Promise.all([
+      q(qq), getProfiles(), q(supabase.from('shifts').select('*').eq('estado', 'aberto')), getSides(),
     ])
     // Turnos abertos aparecem sempre, mesmo fora do período
     const ids = new Set(shifts.map(s => s.id))
-    return { shifts: [...open.filter(s => !ids.has(s.id) && !f.estado), ...shifts], profiles }
-  }, [f.de, f.ate, f.estado, f.operador])
+    const extra = open.filter(s => !ids.has(s.id) && !f.estado && (!f.lado || String(s.side_id) === String(f.lado)))
+    return { shifts: [...extra, ...shifts], profiles, sides }
+  }, [f.de, f.ate, f.estado, f.operador, f.lado])
+  const sides = byId(data?.sides)
 
   const profiles = byId(data?.profiles)
   const shifts = data?.shifts || []
@@ -30,8 +33,8 @@ export default function Shifts({ go }) {
 
   function exportar() {
     downloadCSV(`turnos_${f.de}_${f.ate}.csv`, [
-      ['Turno', 'Operador', 'Abertura', 'Fecho', 'Estado', 'Vendas bomba', 'Outras', 'Crédito', 'A entregar', 'Entregue', 'Diferença'],
-      ...shifts.map(s => [s.id, profiles[s.operador_id]?.nome, dtt(s.aberto_em), dtt(s.fechado_em), s.estado,
+      ['Turno', 'Lado', 'Operador', 'Abertura', 'Fecho', 'Estado', 'Vendas bomba', 'Outras', 'Crédito', 'A entregar', 'Entregue', 'Diferença'],
+      ...shifts.map(s => [s.id, sides[s.side_id]?.nome, profiles[s.operador_id]?.nome, dtt(s.aberto_em), dtt(s.fechado_em), s.estado,
         s.total_bomba, s.total_outras, s.total_credito, s.total_esperado, s.total_declarado, s.diferenca]),
     ])
   }
@@ -50,6 +53,12 @@ export default function Shifts({ go }) {
             <option value="">Todos</option><option value="aberto">Abertos</option><option value="fechado">Fechados (por validar)</option><option value="validado">Validados</option>
           </Select>
         </Field>
+        <Field label="Lado">
+          <Select value={f.lado} onChange={set('lado')}>
+            <option value="">Todos</option>
+            {(data?.sides || []).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}
+          </Select>
+        </Field>
         <Field label="Operador">
           <Select value={f.operador} onChange={set('operador')}>
             <option value="">Todos</option>
@@ -64,7 +73,7 @@ export default function Shifts({ go }) {
           <div className="table-wrap">
             <table className="t">
               <thead><tr>
-                <th>#</th><th>Operador</th><th>Abertura</th><th>Duração</th><th>Estado</th>
+                <th>#</th><th>Lado</th><th>Operador</th><th>Abertura</th><th>Duração</th><th>Estado</th>
                 <th className="right">Vendas</th><th className="right">Crédito</th><th className="right">A entregar</th><th className="right">Entregue</th><th className="right">Diferença</th>
               </tr></thead>
               <tbody>
@@ -74,6 +83,7 @@ export default function Shifts({ go }) {
                   return (
                     <tr key={s.id} className="click" onClick={() => go('turnos/' + s.id)}>
                       <td className="num">{s.id}</td>
+                      <td><b>{sides[s.side_id]?.nome || '—'}</b></td>
                       <td><b>{profiles[s.operador_id]?.nome || '—'}</b></td>
                       <td className="num">{dtt(s.aberto_em)}</td>
                       <td className="num">{duration(s.aberto_em, s.fechado_em)}</td>
@@ -89,7 +99,7 @@ export default function Shifts({ go }) {
               </tbody>
               {fechados.length > 1 && (
                 <tfoot><tr>
-                  <td colSpan={5}>{fechados.length} turnos fechados</td>
+                  <td colSpan={6}>{fechados.length} turnos fechados</td>
                   <td className="right num">{mt(sum('total_bomba') + sum('total_outras'))}</td>
                   <td className="right num">{mt(sum('total_credito'))}</td>
                   <td className="right num">{mt(sum('total_esperado'))}</td>

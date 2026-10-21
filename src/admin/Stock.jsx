@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { getProducts, getTanks, byId } from '../lib/refs.js'
+import { getProducts, getTanks, getSides, byId } from '../lib/refs.js'
 import { mt, lt, n2, dt, dtt, today, parseNum, addDays } from '../lib/format.js'
 import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input, Select, Textarea, FormModal, useAction, confirmar } from '../components/ui.jsx'
 import TankBar from '../components/TankBar.jsx'
@@ -12,17 +12,19 @@ export default function Stock() {
   const [tab, setTab] = useState('recepcoes')
   const { data, loading, error, reload } = useData(async () => {
     const since = addDays(today(), -90)
-    const [products, tanks, deliveries, dips] = await Promise.all([
+    const [products, tanks, deliveries, dips, sides] = await Promise.all([
       getProducts(), getTanks(),
       q(supabase.from('tank_deliveries').select('*').gte('data', since).order('data', { ascending: false }).order('id', { ascending: false })),
       q(supabase.from('tank_dips').select('*').order('medido_em', { ascending: false }).limit(200)),
+      getSides(),
     ])
-    return { products, tanks, deliveries, dips }
+    return { products, tanks, deliveries, dips, sides }
   })
   if (loading && !data) return <Loading />
   if (error) return <ErrorNote error={error} onRetry={reload} />
-  const { products, tanks, deliveries, dips } = data
-  const prod = byId(products), tk = byId(tanks)
+  const { products, tanks, deliveries, dips, sides } = data
+  const prod = byId(products), sd = byId(sides)
+  const tk = Object.fromEntries(tanks.map(t => [t.id, { ...t, nome: `${t.nome} (${sd[t.side_id]?.nome || ''})` }]))
   const close = () => setModal(null)
   const apagarRecepcao = (d) => confirmar(`Apagar a recepção de ${lt(d.quantidade)}? O nível do tanque baixa nesse valor.`) &&
     act(() => q(supabase.from('tank_deliveries').delete().eq('id', d.id)), 'Recepção apagada').then(ok => ok && reload())
@@ -37,16 +39,28 @@ export default function Stock() {
 
       <section className="panel">
         {tanks.length === 0 ? <Empty title="Ainda sem tanques" action={<Btn icon="plus" onClick={() => setModal({ tanque: null })}>Registar tanque</Btn>}>Regista cada tanque com o produto e a capacidade.</Empty> : (
-          <div className="panel-body grid2">
-            {tanks.map(t => (
-              <div key={t.id} className="stack" style={{ gap: 6, opacity: t.activo ? 1 : .5 }}>
-                <TankBar tank={t} product={prod[t.product_id]} />
-                <div className="row muted" style={{ fontSize: 13 }}>
-                  <span>Mínimo {lt(t.nivel_minimo)}</span><div className="spacer" />
-                  <Btn small variant="ghost" icon="edit" onClick={() => setModal({ tanque: t })}>Editar</Btn>
+          <div className="panel-body stack" style={{ gap: 22 }}>
+            {sides.map(side => {
+              const ts = tanks.filter(t => t.side_id === side.id)
+              return (
+                <div key={side.id} className="stack" style={{ gap: 10 }}>
+                  <h3>{side.nome}</h3>
+                  {ts.length === 0 ? <p className="muted">Sem tanques registados neste lado.</p> : (
+                    <div className="grid2">
+                      {ts.map(t => (
+                        <div key={t.id} className="stack" style={{ gap: 6, opacity: t.activo ? 1 : .5 }}>
+                          <TankBar tank={t} product={prod[t.product_id]} />
+                          <div className="row muted" style={{ fontSize: 13 }}>
+                            <span>Mínimo {lt(t.nivel_minimo)}</span><div className="spacer" />
+                            <Btn small variant="ghost" icon="edit" onClick={() => setModal({ tanque: t })}>Editar</Btn>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
@@ -93,28 +107,40 @@ export default function Stock() {
         )}
       </div>
 
-      {modal?.tanque !== undefined && <TankForm tank={modal.tanque} products={products} onClose={close} onSaved={reload} />}
-      {modal === 'recepcao' && <DeliveryForm tanks={tanks.filter(t => t.activo)} onClose={close} onSaved={reload} />}
-      {modal === 'medicao' && <DipForm tanks={tanks.filter(t => t.activo)} onClose={close} onSaved={reload} />}
+      {modal?.tanque !== undefined && <TankForm tank={modal.tanque} products={products} sides={sides} onClose={close} onSaved={reload} />}
+      {modal === 'recepcao' && <DeliveryForm tanks={Object.values(tk).filter(t => t.activo)} onClose={close} onSaved={reload} />}
+      {modal === 'medicao' && <DipForm tanks={Object.values(tk).filter(t => t.activo)} onClose={close} onSaved={reload} />}
     </div>
   )
 }
 
-function TankForm({ tank, products, onClose, onSaved }) {
+function TankForm({ tank, products, sides, onClose, onSaved }) {
   const [f, setF] = useState({
-    nome: tank?.nome || '', product_id: tank?.product_id || '', capacidade: tank?.capacidade ?? '',
+    side_id: tank?.side_id || (sides.length === 1 ? sides[0].id : ''), nome: tank?.nome || '', product_id: tank?.product_id || '', ligar: true, capacidade: tank?.capacidade ?? '',
     nivel_minimo: tank?.nivel_minimo ?? '', nivel_actual: tank?.nivel_actual ?? '', activo: tank?.activo ?? true,
   })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   async function save() {
-    const row = { nome: f.nome.trim(), product_id: Number(f.product_id), capacidade: parseNum(f.capacidade) || 0, nivel_minimo: parseNum(f.nivel_minimo) || 0, activo: f.activo }
-    if (tank) await q(supabase.from('tanks').update(row).eq('id', tank.id))
-    else await q(supabase.from('tanks').insert({ ...row, nivel_actual: parseNum(f.nivel_actual) || 0 }))
+    const row = { side_id: Number(f.side_id), nome: f.nome.trim(), product_id: Number(f.product_id), capacidade: parseNum(f.capacidade) || 0, nivel_minimo: parseNum(f.nivel_minimo) || 0, activo: f.activo }
+    let linked = 0
+    if (tank) {
+      // Se mudou de lado ou de produto, as mangueiras que já não batem certo ficam sem tanque
+      await q(supabase.from('hoses').update({ tank_id: null }).eq('tank_id', tank.id).or(`side_id.neq.${row.side_id},product_id.neq.${row.product_id}`))
+      await q(supabase.from('tanks').update(row).eq('id', tank.id))
+    } else {
+      const t = await q(supabase.from('tanks').insert({ ...row, nivel_actual: parseNum(f.nivel_actual) || 0 }).select().single())
+      if (f.ligar) {
+        const hs = await q(supabase.from('hoses').update({ tank_id: t.id }).eq('side_id', row.side_id).eq('product_id', row.product_id).is('tank_id', null).select('id'))
+        linked = hs.length
+      }
+    }
     onSaved()
-    return tank ? 'Tanque actualizado' : 'Tanque registado'
+    return tank ? 'Tanque actualizado' : linked ? `Tanque registado e ligado a ${linked} mangueira${linked > 1 ? 's' : ''}` : 'Tanque registado'
   }
   return (
     <FormModal title={tank ? 'Editar tanque' : 'Novo tanque'} onClose={onClose} onSubmit={save}>
+      <Field label="Lado"><Select required value={f.side_id} onChange={set('side_id')}><option value="">Escolher…</option>
+        {sides.map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</Select></Field>
       <Field label="Nome"><Input required value={f.nome} onChange={set('nome')} placeholder="ex.: Tanque 1 — Gasóleo" /></Field>
       <Field label="Produto"><Select required value={f.product_id} onChange={set('product_id')}><option value="">Escolher…</option>
         {products.filter(p => p.tipo === 'combustivel').map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</Select></Field>
@@ -123,6 +149,7 @@ function TankForm({ tank, products, onClose, onSaved }) {
         <Field label="Nível mínimo (alerta)"><Input value={f.nivel_minimo} onChange={set('nivel_minimo')} inputMode="decimal" /></Field>
       </div>
       {!tank && <Field label="Nível actual (L)" hint="Medição de hoje. Depois só muda com turnos, recepções e medições."><Input value={f.nivel_actual} onChange={set('nivel_actual')} inputMode="decimal" /></Field>}
+      {!tank && <label className="check"><input type="checkbox" checked={f.ligar} onChange={set('ligar')} />Ligar às mangueiras deste lado e produto que ainda não têm tanque</label>}
       {tank && <label className="check"><input type="checkbox" checked={f.activo} onChange={set('activo')} />Tanque em uso</label>}
     </FormModal>
   )
