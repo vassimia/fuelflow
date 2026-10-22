@@ -11,6 +11,7 @@ export default function TankBar({ tank, product }) {
         <span className="dot" style={{ background: product?.cor || 'var(--muted)' }} />
         <b>{tank.nome}</b>
         <span className="muted">{product?.nome}</span>
+        {tank.estado === 'activo' && <span className="tag validado">a trabalhar</span>}
       </div>
       <div className={`num ${low ? 'neg' : ''}`}><b>{lt(lvl)}</b>{cap > 0 && <span className="muted"> de {n0(cap)} L</span>}</div>
       <div className="tank-bar" role="meter" aria-valuemin={0} aria-valuemax={cap} aria-valuenow={lvl} aria-label={`Nível ${tank.nome}`}>

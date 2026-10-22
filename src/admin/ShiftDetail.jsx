@@ -1,15 +1,15 @@
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { loadShift, getHoses, getProducts, getClients, getProfiles, getSides, byId } from '../lib/refs.js'
-import { mt, lt, n2, dtt, duration, parseNum, METODOS_CAIXA } from '../lib/format.js'
+import { loadShift, getHoses, getProducts, getClients, getProfiles, getSides, getTanks, byId } from '../lib/refs.js'
+import { mt, lt, n2, dtt, hm, duration, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Loading, ErrorNote, Btn, EstadoTag, useAction, confirmar, printDoc } from '../components/ui.jsx'
 import { ShiftReadings, ShiftTotals, CashList } from '../components/ShiftReport.jsx'
 
 export default function ShiftDetail({ id, go }) {
   const act = useAction()
   const { data, loading, error, reload } = useData(async () => {
-    const [s, hoses, products, clients, profiles, sides] = await Promise.all([loadShift(id), getHoses(), getProducts(), getClients(), getProfiles(), getSides()])
-    return { ...s, hoses: byId(hoses), products: byId(products), clients: byId(clients), profiles: byId(profiles), sides: byId(sides) }
+    const [s, hoses, products, clients, profiles, sides, tanks] = await Promise.all([loadShift(id), getHoses(), getProducts(), getClients(), getProfiles(), getSides(), getTanks()])
+    return { ...s, hoses: byId(hoses), products: byId(products), clients: byId(clients), profiles: byId(profiles), sides: byId(sides), tanks: byId(tanks) }
   }, [id])
 
   if (loading && !data) return <Loading />
@@ -74,6 +74,23 @@ export default function ShiftDetail({ id, go }) {
           </div>
         )}
       </section>
+
+      {data.switches.length > 0 && (
+        <section className="panel">
+          <div className="panel-head"><h2>Trocas de tanque neste turno</h2></div>
+          <div className="table-wrap"><table className="t">
+            <thead><tr><th>Hora</th><th>Produto</th><th>Parou</th><th>Começou</th><th className="right">Saíram do que parou</th><th className="right">Sobra (vareta)</th><th>Contadores na troca</th></tr></thead>
+            <tbody>{data.switches.map(sw => (
+              <tr key={sw.id}>
+                <td className="num">{hm(sw.feito_em)}</td><td>{products[sw.product_id]?.nome}</td>
+                <td>{data.tanks[sw.tank_from]?.nome || '—'}</td><td><b>{data.tanks[sw.tank_to]?.nome}</b></td>
+                <td className="right num">{lt(sw.litros_seg)}</td><td className="right num">{sw.sobra != null ? lt(sw.sobra) : '—'}</td>
+                <td className="muted" style={{ fontSize: 13 }}>{(sw.switch_readings || []).map(r => `${hoses[r.hose_id]?.codigo}: ${n2(r.leitura)}`).join(' · ')}{sw.notas ? ` — ${sw.notas}` : ''}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </section>
+      )}
 
       <div className="grid2" style={{ alignItems: 'start' }}>
         <section className="panel">

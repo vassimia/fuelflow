@@ -1,28 +1,31 @@
 import { useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { getProducts, getTanks, getSides, byId } from '../lib/refs.js'
+import { getProducts, getTanks, getSides, getHoses, byId } from '../lib/refs.js'
+import SwitchTankForm from '../components/SwitchTank.jsx'
 import { mt, lt, n2, dt, dtt, today, parseNum, addDays } from '../lib/format.js'
-import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input, Select, Textarea, FormModal, useAction, confirmar } from '../components/ui.jsx'
+import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input, Select, Textarea, FormModal, Tag, useAction, confirmar } from '../components/ui.jsx'
 import TankBar from '../components/TankBar.jsx'
 
 export default function Stock() {
   const act = useAction()
   const [modal, setModal] = useState(null)
-  const [tab, setTab] = useState('recepcoes')
+  const [tab, setTab] = useState('ciclos')
   const { data, loading, error, reload } = useData(async () => {
     const since = addDays(today(), -90)
-    const [products, tanks, deliveries, dips, sides] = await Promise.all([
+    const [products, tanks, deliveries, dips, sides, hoses, cycles, open] = await Promise.all([
       getProducts(), getTanks(),
       q(supabase.from('tank_deliveries').select('*').gte('data', since).order('data', { ascending: false }).order('id', { ascending: false })),
       q(supabase.from('tank_dips').select('*').order('medido_em', { ascending: false }).limit(200)),
-      getSides(),
+      getSides(), getHoses(),
+      q(supabase.from('tank_cycle_status').select('*').order('iniciado_em', { ascending: false }).limit(300)),
+      q(supabase.from('shifts').select('id, side_id').eq('estado', 'aberto')),
     ])
-    return { products, tanks, deliveries, dips, sides }
+    return { products, tanks, deliveries, dips, sides, hoses, cycles, open }
   })
   if (loading && !data) return <Loading />
   if (error) return <ErrorNote error={error} onRetry={reload} />
-  const { products, tanks, deliveries, dips, sides } = data
+  const { products, tanks, deliveries, dips, sides, hoses, cycles, open } = data
   const prod = byId(products), sd = byId(sides)
   const tk = Object.fromEntries(tanks.map(t => [t.id, { ...t, nome: `${t.nome} (${sd[t.side_id]?.nome || ''})` }]))
   const close = () => setModal(null)
@@ -31,7 +34,7 @@ export default function Stock() {
 
   return (
     <div className="stack" style={{ gap: 18 }}>
-      <PageHead title="Tanques e stock" sub="O nível desce com cada turno fechado e sobe com cada recepção.">
+      <PageHead title="Tanques e stock" sub="Em cada lado trabalha um tanque de cada produto. O nível desce com os turnos e sobe com as recepções.">
         <Btn variant="secondary" icon="plus" onClick={() => setModal({ tanque: null })}>Novo tanque</Btn>
         <Btn variant="secondary" onClick={() => setModal('medicao')} disabled={!tanks.length}>Registar medição</Btn>
         <Btn icon="plus" onClick={() => setModal('recepcao')} disabled={!tanks.length}>Registar recepção</Btn>
@@ -44,14 +47,16 @@ export default function Stock() {
               const ts = tanks.filter(t => t.side_id === side.id)
               return (
                 <div key={side.id} className="stack" style={{ gap: 10 }}>
-                  <h3>{side.nome}</h3>
+                  <div className="row"><h3>{side.nome}</h3><div className="spacer" />
+                    {ts.length > 0 && <Btn small variant="secondary" icon="tank" onClick={() => setModal({ troca: side })}>Trocar tanque</Btn>}</div>
                   {ts.length === 0 ? <p className="muted">Sem tanques registados neste lado.</p> : (
                     <div className="grid2">
                       {ts.map(t => (
                         <div key={t.id} className="stack" style={{ gap: 6, opacity: t.activo ? 1 : .5 }}>
                           <TankBar tank={t} product={prod[t.product_id]} />
                           <div className="row muted" style={{ fontSize: 13 }}>
-                            <span>Mínimo {lt(t.nivel_minimo)}</span><div className="spacer" />
+                            {t.estado !== 'activo' && <Tag>Parado</Tag>}
+                            <span>Lastro {lt(t.lastro)} · mínimo {lt(t.nivel_minimo)}</span><div className="spacer" />
                             <Btn small variant="ghost" icon="edit" onClick={() => setModal({ tanque: t })}>Editar</Btn>
                           </div>
                         </div>
@@ -67,9 +72,11 @@ export default function Stock() {
 
       <div>
         <div className="tabs">
+          <button className={`tab ${tab === 'ciclos' ? 'on' : ''}`} onClick={() => setTab('ciclos')}>Ciclos e perdas</button>
           <button className={`tab ${tab === 'recepcoes' ? 'on' : ''}`} onClick={() => setTab('recepcoes')}>Recepções (90 dias)</button>
           <button className={`tab ${tab === 'medicoes' ? 'on' : ''}`} onClick={() => setTab('medicoes')}>Medições</button>
         </div>
+        {tab === 'ciclos' && <Cycles cycles={cycles} sides={sd} products={prod} />}
         {tab === 'recepcoes' && (
           <section className="panel">
             {deliveries.length === 0 ? <Empty title="Sem recepções registadas" /> : (
@@ -107,6 +114,8 @@ export default function Stock() {
         )}
       </div>
 
+      {modal?.troca && <SwitchTankForm sideId={modal.troca.id} sideName={modal.troca.nome} shiftId={open.find(o => o.side_id === modal.troca.id)?.id}
+        tanks={tanks} hoses={hoses} products={products} onClose={close} onSaved={() => { close(); reload() }} />}
       {modal?.tanque !== undefined && <TankForm tank={modal.tanque} products={products} sides={sides} onClose={close} onSaved={reload} />}
       {modal === 'recepcao' && <DeliveryForm tanks={Object.values(tk).filter(t => t.activo)} onClose={close} onSaved={reload} />}
       {modal === 'medicao' && <DipForm tanks={Object.values(tk).filter(t => t.activo)} onClose={close} onSaved={reload} />}
@@ -116,40 +125,31 @@ export default function Stock() {
 
 function TankForm({ tank, products, sides, onClose, onSaved }) {
   const [f, setF] = useState({
-    side_id: tank?.side_id || (sides.length === 1 ? sides[0].id : ''), nome: tank?.nome || '', product_id: tank?.product_id || '', ligar: true, capacidade: tank?.capacidade ?? '',
+    side_id: tank?.side_id || (sides.length === 1 ? sides[0].id : ''), nome: tank?.nome || '', product_id: tank?.product_id || '', lastro: tank?.lastro ?? 200, capacidade: tank?.capacidade ?? '',
     nivel_minimo: tank?.nivel_minimo ?? '', nivel_actual: tank?.nivel_actual ?? '', activo: tank?.activo ?? true,
   })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   async function save() {
-    const row = { side_id: Number(f.side_id), nome: f.nome.trim(), product_id: Number(f.product_id), capacidade: parseNum(f.capacidade) || 0, nivel_minimo: parseNum(f.nivel_minimo) || 0, activo: f.activo }
-    let linked = 0
-    if (tank) {
-      // Se mudou de lado ou de produto, as mangueiras que já não batem certo ficam sem tanque
-      await q(supabase.from('hoses').update({ tank_id: null }).eq('tank_id', tank.id).or(`side_id.neq.${row.side_id},product_id.neq.${row.product_id}`))
-      await q(supabase.from('tanks').update(row).eq('id', tank.id))
-    } else {
-      const t = await q(supabase.from('tanks').insert({ ...row, nivel_actual: parseNum(f.nivel_actual) || 0 }).select().single())
-      if (f.ligar) {
-        const hs = await q(supabase.from('hoses').update({ tank_id: t.id }).eq('side_id', row.side_id).eq('product_id', row.product_id).is('tank_id', null).select('id'))
-        linked = hs.length
-      }
-    }
+    const row = { side_id: Number(f.side_id), nome: f.nome.trim(), product_id: Number(f.product_id), capacidade: parseNum(f.capacidade) || 0, nivel_minimo: parseNum(f.nivel_minimo) || 0, lastro: parseNum(f.lastro) ?? 200, activo: f.activo }
+    if (tank) await q(supabase.from('tanks').update(row).eq('id', tank.id))
+    else await q(supabase.from('tanks').insert({ ...row, nivel_actual: parseNum(f.nivel_actual) || 0 }))
     onSaved()
-    return tank ? 'Tanque actualizado' : linked ? `Tanque registado e ligado a ${linked} mangueira${linked > 1 ? 's' : ''}` : 'Tanque registado'
+    return tank ? 'Tanque actualizado' : 'Tanque registado'
   }
   return (
     <FormModal title={tank ? 'Editar tanque' : 'Novo tanque'} onClose={onClose} onSubmit={save}>
-      <Field label="Lado"><Select required value={f.side_id} onChange={set('side_id')}><option value="">Escolher…</option>
+      <Field label="Lado"><Select required value={f.side_id} onChange={set('side_id')} disabled={!!tank}><option value="">Escolher…</option>
         {sides.map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</Select></Field>
       <Field label="Nome"><Input required value={f.nome} onChange={set('nome')} placeholder="ex.: Tanque 1 — Gasóleo" /></Field>
-      <Field label="Produto"><Select required value={f.product_id} onChange={set('product_id')}><option value="">Escolher…</option>
+      <Field label="Produto"><Select required value={f.product_id} onChange={set('product_id')} disabled={!!tank}><option value="">Escolher…</option>
         {products.filter(p => p.tipo === 'combustivel').map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</Select></Field>
       <div className="grid2">
         <Field label="Capacidade (L)"><Input value={f.capacidade} onChange={set('capacidade')} inputMode="decimal" /></Field>
         <Field label="Nível mínimo (alerta)"><Input value={f.nivel_minimo} onChange={set('nivel_minimo')} inputMode="decimal" /></Field>
       </div>
       {!tank && <Field label="Nível actual (L)" hint="Medição de hoje. Depois só muda com turnos, recepções e medições."><Input value={f.nivel_actual} onChange={set('nivel_actual')} inputMode="decimal" /></Field>}
-      {!tank && <label className="check"><input type="checkbox" checked={f.ligar} onChange={set('ligar')} />Ligar às mangueiras deste lado e produto que ainda não têm tanque</label>}
+      <Field label="Lastro (L)" hint="O que fica no fundo e a bomba já não chupa. Aparece como sobra sugerida na troca."><Input value={f.lastro} onChange={set('lastro')} inputMode="decimal" /></Field>
+      {!tank && <p className="muted" style={{ fontSize: 13 }}>Se for o primeiro tanque deste produto no lado, fica logo a trabalhar. Os outros ficam parados até haver uma troca.</p>}
       {tank && <label className="check"><input type="checkbox" checked={f.activo} onChange={set('activo')} />Tanque em uso</label>}
     </FormModal>
   )
@@ -204,5 +204,35 @@ function DipForm({ tanks, onClose, onSaved }) {
       <label className="check"><input type="checkbox" checked={f.ajustar} onChange={set('ajustar')} />Corrigir o nível do sistema para o valor medido</label>
       <Field label="Notas"><Textarea value={f.notas} onChange={set('notas')} /></Field>
     </FormModal>
+  )
+}
+
+function Cycles({ cycles, sides, products }) {
+  if (!cycles.length) return <section className="panel"><Empty title="Ainda sem ciclos">Um ciclo começa quando um tanque é ligado e termina na troca seguinte.</Empty></section>
+  const pct = (perda, vend) => Number(vend) > 0 ? n2(Number(perda) / Number(vend) * 100) + '%' : '—'
+  return (
+    <section className="panel">
+      <div className="panel-body muted" style={{ fontSize: 14 }}>Perda = nível ao ligar + recepções − litros tirados pelas bombas − sobra medida na troca. Positivo quer dizer que falta combustível.</div>
+      <div className="table-wrap"><table className="t">
+        <thead><tr><th>Tanque</th><th>Ligado</th><th>Desligado</th><th className="right">Ao ligar</th><th className="right">Recepções</th><th className="right">Bombas tiraram</th><th className="right">Sobra</th><th className="right">Perda</th><th className="right">%</th></tr></thead>
+        <tbody>{cycles.map(c => {
+          const aberto = !c.terminado_em
+          const perda = Number(c.perda || 0)
+          return (
+            <tr key={c.id}>
+              <td><b>{c.tank_nome}</b><div className="muted" style={{ fontSize: 12 }}>{sides[c.side_id]?.nome} · {products[c.product_id]?.nome}</div></td>
+              <td className="num">{dtt(c.iniciado_em)}</td>
+              <td className="num">{aberto ? <Tag kind="aberto">A trabalhar</Tag> : dtt(c.terminado_em)}</td>
+              <td className="right num">{lt(c.nivel_inicial)}</td>
+              <td className="right num">{aberto ? '—' : lt(c.entradas)}</td>
+              <td className="right num">{lt(aberto ? c.vendido_ate_agora : c.vendido)}</td>
+              <td className="right num">{aberto ? '—' : lt(c.sobra)}</td>
+              <td className={`right num ${!aberto && perda > 0 ? 'neg' : !aberto && perda < 0 ? 'pos' : ''}`}><b>{aberto ? '—' : lt(perda)}</b></td>
+              <td className="right num">{aberto ? '—' : pct(perda, c.vendido)}</td>
+            </tr>
+          )
+        })}</tbody>
+      </table></div>
+    </section>
   )
 }

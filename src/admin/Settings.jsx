@@ -132,7 +132,7 @@ function Hoses() {
   })
   if (loading && !data) return <Loading />
   if (error) return <ErrorNote error={error} onRetry={reload} />
-  const prod = byId(data.products), tk = byId(data.tanks)
+  const prod = byId(data.products)
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="row"><p className="muted">Cada lado tem o seu fecho de turno. O contador de cada mangueira é a leitura com que o próximo turno desse lado começa.</p><div className="spacer" />
@@ -150,12 +150,12 @@ function Hoses() {
             </div>
             {hs.length === 0 ? <Empty title="Sem mangueiras neste lado" /> : (
               <div className="table-wrap"><table className="t">
-                <thead><tr><th>Bomba</th><th>Mangueira</th><th>Produto</th><th>Tanque</th><th>Contador actual</th><th>Estado</th><th /></tr></thead>
+                <thead><tr><th>Bomba</th><th>Mangueira</th><th>Produto</th><th>Tanque a trabalhar</th><th>Contador actual</th><th>Estado</th><th /></tr></thead>
                 <tbody>{hs.map(h => (
                   <tr key={h.id}>
                     <td>{h.bomba}</td><td><b>{h.codigo}</b></td>
                     <td><span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: prod[h.product_id]?.cor }} />{prod[h.product_id]?.nome}</span></td>
-                    <td>{tk[h.tank_id]?.nome || <span className="neg">sem tanque</span>}</td>
+                    <td>{data.tanks.find(t => t.side_id === h.side_id && t.product_id === h.product_id && t.estado === 'activo')?.nome || <span className="neg">nenhum tanque ligado</span>}</td>
                     <td><Meter value={h.leitura_actual} size="sm" /></td>
                     <td>{data.busy.has(h.id) ? <Tag kind="aberto">Em turno</Tag> : h.activo ? <Tag kind="validado">Activa</Tag> : <Tag>Inactiva</Tag>}</td>
                     <td className="right"><Btn small variant="ghost" icon="edit" onClick={() => setModal({ h })}>Editar</Btn></td>
@@ -210,15 +210,15 @@ function HoseForm({ hose, busy, products, tanks, sides, onClose, onSaved }) {
   const [f, setF] = useState({ side_id: hose?.side_id || '', codigo: hose?.codigo || '', bomba: hose?.bomba || '', product_id: hose?.product_id || '', tank_id: hose?.tank_id || '', leitura_actual: hose?.leitura_actual ?? '', activo: hose?.activo ?? true, ordem: hose?.ordem ?? 0 })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   const changedMeter = hose && parseNum(f.leitura_actual) !== Number(hose.leitura_actual)
-  const tankOptions = tanks.filter(t => String(t.side_id) === String(f.side_id) && String(t.product_id) === String(f.product_id))
   async function save() {
     const leitura = parseNum(f.leitura_actual)
     if (leitura == null || leitura < 0) throw new Error('Indica o contador actual da mangueira.')
     if (busy && (changedMeter || String(f.side_id) !== String(hose.side_id))) throw new Error('Esta mangueira está num turno aberto. Fecha o turno antes de mudar o contador ou o lado.')
-    const tankOk = tankOptions.some(t => String(t.id) === String(f.tank_id))
-    const row = { side_id: Number(f.side_id), codigo: f.codigo.trim(), bomba: f.bomba.trim(), product_id: Number(f.product_id), tank_id: tankOk ? Number(f.tank_id) : null, leitura_actual: leitura, activo: f.activo, ordem: Number(f.ordem) || 0 }
-    if (hose) await q(supabase.from('hoses').update(row).eq('id', hose.id))
-    else await q(supabase.from('hoses').insert(row))
+    const row = { side_id: Number(f.side_id), codigo: f.codigo.trim(), bomba: f.bomba.trim(), product_id: Number(f.product_id), activo: f.activo, ordem: Number(f.ordem) || 0 }
+    if (hose) {
+      await q(supabase.from('hoses').update(row).eq('id', hose.id))
+      if (changedMeter) await q(supabase.rpc('set_hose_counters', { p_items: [{ id: hose.id, leitura }] }))
+    } else await q(supabase.from('hoses').insert({ ...row, leitura_actual: leitura }))
     onSaved()
     return hose ? 'Mangueira actualizada' : 'Mangueira registada'
   }
@@ -231,10 +231,7 @@ function HoseForm({ hose, busy, products, tanks, sides, onClose, onSaved }) {
         <Field label="Código" hint="ex.: B1 - D"><Input required value={f.codigo} onChange={set('codigo')} /></Field>
       </div>
       <Field label="Produto"><Select required value={f.product_id} onChange={set('product_id')}><option value="">Escolher…</option>{fuel.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</Select></Field>
-      <Field label="Tanque de onde sai" hint="Só aparecem tanques do mesmo lado e produto">
-        <Select value={tankOptions.some(t => String(t.id) === String(f.tank_id)) ? f.tank_id : ''} onChange={set('tank_id')}><option value="">Sem tanque</option>
-          {tankOptions.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}</Select>
-      </Field>
+      <p className="muted" style={{ fontSize: 13 }}>A mangueira tira sempre do tanque que está a trabalhar no seu lado para este produto.</p>
       <Field label="Contador actual" hint={hose ? 'Só muda isto se o contador foi trocado ou reiniciado.' : 'O número que o contador da bomba mostra agora.'}>
         <Input required value={f.leitura_actual} onChange={set('leitura_actual')} inputMode="decimal" disabled={busy} />
       </Field>

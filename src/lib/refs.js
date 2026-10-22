@@ -17,17 +17,21 @@ export async function shiftTotals(shiftId) {
 
 // Carrega tudo o que um turno precisa
 export async function loadShift(id) {
-  const [shift, readings, credit, other, cash] = await Promise.all([
+  const [shift, readings, credit, other, cash, switches] = await Promise.all([
     q(supabase.from('shifts').select('*').eq('id', id).single()),
     q(supabase.from('shift_readings').select('*').eq('shift_id', id).order('id')),
     q(supabase.from('credit_sales').select('*').eq('shift_id', id).order('created_at')),
     q(supabase.from('other_sales').select('*').eq('shift_id', id).order('created_at')),
     q(supabase.from('cash_entries').select('*').eq('shift_id', id).order('created_at')),
+    q(supabase.from('tank_switches').select('*, switch_readings(*)').eq('shift_id', id).order('feito_em')),
   ])
   const totals = shift.estado === 'aberto' ? await shiftTotals(id) : shift
   // Mangueiras pela ordem da bomba
   const hoses = byId(await getHoses())
   readings.sort((a, b) => (hoses[a.hose_id]?.ordem ?? 0) - (hoses[b.hose_id]?.ordem ?? 0) ||
     String(hoses[a.hose_id]?.codigo).localeCompare(String(hoses[b.hose_id]?.codigo)))
-  return { shift, readings, credit, other, cash, totals }
+  // Último contador registado numa troca de tanque, por mangueira
+  const lastSwitch = {}
+  for (const sw of switches) for (const r of sw.switch_readings || []) lastSwitch[r.hose_id] = Number(r.leitura)
+  return { shift, readings, credit, other, cash, totals, switches, lastSwitch }
 }

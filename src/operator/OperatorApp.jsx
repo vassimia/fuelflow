@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
-import { loadShift, getHoses, getProducts, getClients, getSides, byId } from '../lib/refs.js'
+import { loadShift, getHoses, getProducts, getClients, getSides, getTanks, byId } from '../lib/refs.js'
+import SwitchTankForm from '../components/SwitchTank.jsx'
 import { mt, lt, n2, hm, dt, dtt, duration, today, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Btn, Field, Input, Select, Icon, Meter, Loading, ErrorNote, Empty, EstadoTag, Modal, useAction, useToast, confirmar } from '../components/ui.jsx'
 import { ShiftTotals, CashList } from '../components/ShiftReport.jsx'
 
 export default function OperatorApp({ profile, onLogout, onAdminMode }) {
   const { data, loading, error, reload } = useData(async () => {
-    const [open, hoses, products, clients, history, sides] = await Promise.all([
+    const [open, hoses, products, clients, history, sides, tanks] = await Promise.all([
       q(supabase.from('shifts').select('*').eq('operador_id', profile.id).eq('estado', 'aberto').maybeSingle()),
       getHoses(), getProducts(), getClients(),
       q(supabase.from('shifts').select('*').eq('operador_id', profile.id).neq('estado', 'aberto').order('aberto_em', { ascending: false }).limit(8)),
-      getSides(),
+      getSides(), getTanks(),
     ])
-    return { open, hoses, products, clients, history, sides: byId(sides) }
+    return { open, hoses, products, clients, history, sides: byId(sides), tanks }
   }, [profile.id])
   const [done, setDone] = useState(null)
 
@@ -29,7 +30,7 @@ export default function OperatorApp({ profile, onLogout, onAdminMode }) {
       </header>
       {loading && !data ? <Loading /> : error ? <div className="op-body"><ErrorNote error={error} onRetry={reload} /></div>
         : done ? <ClosedScreen shift={done} side={data.sides[done.side_id]?.nome} onOk={() => { setDone(null); reload() }} />
-        : data.open ? <OpenShift shiftId={data.open.id} refs={data} onClosed={(s) => setDone(s)} />
+        : data.open ? <OpenShift shiftId={data.open.id} refs={data} reloadRefs={reload} onClosed={(s) => setDone(s)} />
         : <StartShift refs={data} history={data.history} onOpened={reload} />}
     </div>
   )
@@ -117,8 +118,9 @@ function StartShift({ refs, history, onOpened }) {
 }
 
 // ---------------------------------------------------------------- Turno aberto
-function OpenShift({ shiftId, refs, onClosed }) {
+function OpenShift({ shiftId, refs, reloadRefs, onClosed }) {
   const [tab, setTab] = useState('credito')
+  const [troca, setTroca] = useState(false)
   const { data, loading, error, reload } = useData(() => loadShift(shiftId), [shiftId])
   const prod = byId(refs.products), hoses = byId(refs.hoses), cli = byId(refs.clients)
 
@@ -136,6 +138,10 @@ function OpenShift({ shiftId, refs, onClosed }) {
       {tab === 'credito' && <CreditTab {...ctx} />}
       {tab === 'outras' && <OtherTab {...ctx} />}
       {tab === 'fecho' && <CloseTab {...ctx} onClosed={onClosed} />}
+      <Btn variant="secondary" icon="tank" onClick={() => setTroca(true)}>Trocar tanque (tanque chegou ao lastro)</Btn>
+      {troca && <SwitchTankForm sideId={data.shift.side_id} sideName={refs.sides[data.shift.side_id]?.nome} shiftId={shiftId}
+        tanks={refs.tanks} hoses={refs.hoses} products={refs.products}
+        onClose={() => setTroca(false)} onSaved={() => { setTroca(false); reload(); reloadRefs() }} />}
     </div>
   )
 }
@@ -279,7 +285,7 @@ function OtherTab({ shift, other, prod, refs, reload }) {
 }
 
 // ---------------------------------------------------------------- Fecho
-function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed }) {
+function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed, switches, lastSwitch, refs }) {
   const act = useAction()
   const [finals, setFinals] = useState(() => Object.fromEntries(readings.map(r => [r.id, r.leitura_final == null ? '' : String(r.leitura_final)])))
   const [cf, setCf] = useState({ metodo: 'numerario', tipo: 'entrada', valor: '', referencia: '', notas: '' })
@@ -289,8 +295,9 @@ function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed
   const rows = useMemo(() => readings.map(r => {
     const fin = parseNum(finals[r.id])
     const litros = fin == null ? null : fin - Number(r.leitura_inicial)
-    return { ...r, fin, litros, valor: litros == null ? null : litros * Number(r.preco), bad: fin != null && fin < Number(r.leitura_inicial) }
-  }), [readings, finals])
+    const min = lastSwitch[r.hose_id] ?? Number(r.leitura_inicial)
+    return { ...r, fin, litros, min, valor: litros == null ? null : litros * Number(r.preco), bad: fin != null && fin < min }
+  }), [readings, finals, lastSwitch])
   const missing = rows.filter(r => r.fin == null)
   const bad = rows.filter(r => r.bad)
   const bomba = rows.reduce((a, r) => a + (r.valor || 0), 0)
@@ -301,7 +308,7 @@ function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed
   async function saveReading(r) {
     const fin = parseNum(finals[r.id])
     if (fin == null || fin === Number(r.leitura_final)) return true
-    if (fin < Number(r.leitura_inicial)) return false
+    if (fin < (lastSwitch[r.hose_id] ?? Number(r.leitura_inicial))) return false
     return act(() => q(supabase.from('shift_readings').update({ leitura_final: fin }).eq('id', r.id)))
   }
   async function addCash(e) {
@@ -339,11 +346,16 @@ function CloseTab({ shift, readings, cash, totals, prod, hoses, reload, onClosed
               <Input className="big num" inputMode="decimal" value={finals[r.id]} placeholder={n2(r.leitura_inicial)}
                 onChange={e => setFinals(x => ({ ...x, [r.id]: e.target.value }))} onBlur={() => saveReading(r)} />
             </Field>
-            {r.bad ? <div className="note err">A leitura final não pode ser menor que a inicial ({n2(r.leitura_inicial)}).</div>
+            {lastSwitch[r.hose_id] != null && <div className="row between"><span className="muted">Na troca de tanque</span><Meter value={lastSwitch[r.hose_id]} size="sm" /></div>}
+            {r.bad ? <div className="note err">A leitura final não pode ser menor que {n2(r.min)}{lastSwitch[r.hose_id] != null ? ' (contador na troca de tanque)' : ' (inicial)'}.</div>
               : r.litros != null && <div className="row between"><span>{lt(r.litros)}</span><b className="num">{mt(r.valor)}</b></div>}
           </div>
         ))}
       </section>
+
+      {switches.length > 0 && (
+        <div className="note">{switches.length === 1 ? 'Houve 1 troca de tanque' : `Houve ${switches.length} trocas de tanque`} neste turno: {switches.map(sw => `${hm(sw.feito_em)} ${refs.tanks.find(t => t.id === sw.tank_from)?.nome || '—'} → ${refs.tanks.find(t => t.id === sw.tank_to)?.nome}`).join('; ')}.</div>
+      )}
 
       <section className="stack" style={{ gap: 10 }}>
         <h2>2. Valores entregues</h2>

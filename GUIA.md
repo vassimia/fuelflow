@@ -12,7 +12,7 @@ App de gestão da Estação de Serviço Quelimane: turnos e leituras das bombas,
 O FuelFlow v2 usa o **mesmo projecto Supabase** do app antigo (`xsvdgggdgiibqcfaozzs`), mas guarda tudo num schema separado chamado `fuelflow`. As tabelas e os dados do app antigo (schema `public`) não são tocados.
 
 1. No Supabase, abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
-   Depois corre, também no SQL Editor e por esta ordem, os ficheiros da pasta `supabase/migrations/` (`002_lados.sql`, e `003_bombas_quelimane.sql` se quiseres as 6 bombas da Estação de Quelimane já criadas).
+   Depois corre, também no SQL Editor e por esta ordem, os ficheiros da pasta `supabase/migrations/` (`002_lados.sql`, `004_tanques_activos.sql`, e `003_bombas_quelimane.sql` se quiseres as 6 bombas da Estação de Quelimane já criadas).
 2. Vai a **Project Settings → Data API → Exposed schemas**, acrescenta `fuelflow` e clica **Save**.
 3. **Conta de admin.** O teu email já tem conta no Supabase por causa do app antigo. Abre `supabase/admin.sql`, troca `MUDA_ESTA_SENHA` pela senha que queres, cola no SQL Editor e clica **Run**. Entras no app com `vassim` (ou o email) e essa senha.
 4. Em **Authentication → Sign In / Providers**, **"Allow new users to sign up"** tem de estar ligado (é assim que o admin cria operadores). A confirmação por email pode ficar ligada: o app confirma sozinho as contas dos operadores.
@@ -36,7 +36,7 @@ Para testar no teu computador: copia `.env.example` para `.env`, preenche, e cor
 2. Em **Configuração**:
    - **Empresa**: NUIT, contacto e dados bancários (aparecem nas faturas e extratos).
    - **Produtos e preços**: põe os preços da Gasolina e do Gasóleo e acrescenta lubrificantes, se venderes.
-3. Em **Tanques e stock → Novo tanque**: um por tanque, com o lado, a capacidade e o nível medido hoje. O tanque liga-se sozinho às mangueiras desse lado e produto.
+3. Em **Tanques e stock → Novo tanque**: um por tanque, com o lado, a capacidade e o nível medido hoje. O primeiro tanque de cada produto num lado fica logo a trabalhar; os outros ficam parados até haver uma troca.
 4. Em **Configuração → Bombas e mangueiras**: carrega em **Acertar contadores** em cada lado e escreve o número que cada bomba mostra agora.
 5. Em **Configuração → Utilizadores → Novo operador**: nome, nome de utilizador e senha. O operador entra no telemóvel com esse nome de utilizador.
 6. Em **Clientes → Novo cliente**: as empresas que abastecem a crédito, com o limite de crédito.
@@ -44,6 +44,10 @@ Para testar no teu computador: copia `.env.example` para `.env`, preenche, e cor
 ## Como funciona
 
 **Lados**: a estação tem dois lados (Lado A: bombas 1–4, Lado B: bombas 5–6), cada um com os seus tanques e o seu fecho. Só pode haver um turno aberto por lado.
+
+**Tanques e trocas**: em cada lado trabalha um tanque de cada produto de cada vez. Quando o tanque chega ao lastro (~200 L), o operador carrega em **Trocar tanque** no turno, escreve os contadores das mangueiras desse produto e a sobra medida na vareta, e escolhe o tanque que entra. Os litros do turno são divididos entre os dois tanques pelos contadores da troca.
+
+**Perdas**: cada tanque tem ciclos (de quando é ligado até à troca). Em **Tanques e stock → Ciclos e perdas**: perda = nível ao ligar + recepções − litros tirados pelas bombas − sobra medida.
 
 **Turno**: o operador escolhe o lado e o turno abre com todas as mangueiras activas desse lado. As leituras iniciais são as finais do turno anterior e não podem ser alteradas. No fecho escreve as leituras finais e os valores entregues (numerário, M-Pesa, e-Mola, POS e despesas). O app calcula:
 

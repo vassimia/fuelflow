@@ -10,13 +10,14 @@ const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, 
 export default function Reports() {
   const [per, setPer] = useState({ de: monthStart(), ate: today() })
   const { data, loading, error, reload } = useData(async () => {
-    const [products, profiles, clients, hoses, tanks, shifts, sales, payments, deliveries, sides] = await Promise.all([
+    const [products, profiles, clients, hoses, tanks, shifts, sales, payments, deliveries, sides, usage] = await Promise.all([
       getProducts(), getProfiles(), getClients(), getHoses(), getTanks(),
       q(supabase.from('shifts').select('*').neq('estado', 'aberto').gte('fechado_em', dayStart(per.de)).lte('fechado_em', dayEnd(per.ate))),
       q(supabase.from('credit_sales').select('client_id, product_id, quantidade, total').gte('data', per.de).lte('data', per.ate)),
       q(supabase.from('payments').select('client_id, valor').gte('data', per.de).lte('data', per.ate)),
       q(supabase.from('tank_deliveries').select('tank_id, quantidade').gte('data', per.de).lte('data', per.ate)),
       getSides(),
+      q(supabase.from('tank_usage').select('tank_id, litros').gte('created_at', dayStart(per.de)).lte('created_at', dayEnd(per.ate))),
     ])
     const ids = shifts.map(s => s.id)
     let readings = [], other = []
@@ -27,7 +28,7 @@ export default function Reports() {
       ])
       readings = readings.concat(r); other = other.concat(o)
     }
-    return { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides }
+    return { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides, usage }
   }, [per.de, per.ate])
 
   const set = (k) => (e) => setPer(p => ({ ...p, [k]: e.target.value }))
@@ -43,7 +44,7 @@ export default function Reports() {
   if (loading && !data) return <div className="stack">{head}<Loading /></div>
   if (error) return <div className="stack">{head}<ErrorNote error={error} onRetry={reload} /></div>
 
-  const { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides } = data
+  const { products, profiles, clients, hoses, tanks, shifts, readings, other, sales, payments, deliveries, sides, usage } = data
   const prod = byId(products), prof = byId(profiles), cli = byId(clients), hose = byId(hoses)
   const tag = `${per.de}_${per.ate}`
 
@@ -88,7 +89,7 @@ export default function Reports() {
 
   // 5. Stock por tanque
   const saidas = {}
-  readings.forEach(r => { const t = hose[r.hose_id]?.tank_id; if (t) saidas[t] = (saidas[t] || 0) + Number(r.litros) })
+  usage.forEach(u => { saidas[u.tank_id] = (saidas[u.tank_id] || 0) + Number(u.litros) })
   const entradas = {}
   deliveries.forEach(d => { entradas[d.tank_id] = (entradas[d.tank_id] || 0) + Number(d.quantidade) })
 
@@ -137,7 +138,7 @@ export default function Reports() {
         <Section title="Stock por tanque" onCSV={() => downloadCSV(`stock_${tag}.csv`, [['Tanque', 'Entradas', 'Saídas (bombas)', 'Nível actual'], ...tanks.map(t => [t.nome, entradas[t.id] || 0, saidas[t.id] || 0, t.nivel_actual])])}>
           {tanks.length === 0 ? <Empty title="Sem tanques" /> : (
             <table className="t"><thead><tr><th>Tanque</th><th className="right">Entradas</th><th className="right">Saídas</th><th className="right">Nível actual</th></tr></thead>
-              <tbody>{tanks.map(t => <tr key={t.id}><td>{t.nome}</td><td className="right num pos">{lt(entradas[t.id] || 0)}</td><td className="right num">{lt(saidas[t.id] || 0)}</td><td className="right num"><b>{lt(t.nivel_actual)}</b></td></tr>)}</tbody></table>
+              <tbody>{tanks.map(t => <tr key={t.id}><td>{t.nome} <span className="muted">{sides.find(x => x.id === t.side_id)?.nome}</span></td><td className="right num pos">{lt(entradas[t.id] || 0)}</td><td className="right num">{lt(saidas[t.id] || 0)}</td><td className="right num"><b>{lt(t.nivel_actual)}</b></td></tr>)}</tbody></table>
           )}
         </Section>
       </div>
