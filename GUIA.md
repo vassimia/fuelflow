@@ -12,7 +12,7 @@ App de gestão da Estação de Serviço Quelimane: turnos e leituras das bombas,
 O FuelFlow v2 usa o **mesmo projecto Supabase** do app antigo (`xsvdgggdgiibqcfaozzs`), mas guarda tudo num schema separado chamado `fuelflow`. As tabelas e os dados do app antigo (schema `public`) não são tocados.
 
 1. No Supabase, abre **SQL Editor → New query**, cola o conteúdo de `supabase/schema.sql` e clica **Run**. Deve terminar com "Success".
-   Depois corre, também no SQL Editor e por esta ordem, os ficheiros da pasta `supabase/migrations/` (`002_lados.sql`, `004_tanques_activos.sql`, e `003_bombas_quelimane.sql` se quiseres as 6 bombas da Estação de Quelimane já criadas).
+   Depois corre, também no SQL Editor e por esta ordem, os ficheiros da pasta `supabase/migrations/` (`002_lados.sql`, `004_tanques_activos.sql`, `005_fotos_requisicao.sql`, e `003_bombas_quelimane.sql` se quiseres as 6 bombas da Estação de Quelimane já criadas).
 2. Vai a **Project Settings → Data API → Exposed schemas**, acrescenta `fuelflow` e clica **Save**.
 3. **Conta de admin.** O teu email já tem conta no Supabase por causa do app antigo. Abre `supabase/admin.sql`, troca `MUDA_ESTA_SENHA` pela senha que queres, cola no SQL Editor e clica **Run**. Entras no app com `vassim` (ou o email) e essa senha.
 4. Em **Authentication → Sign In / Providers**, **"Allow new users to sign up"** tem de estar ligado (é assim que o admin cria operadores). A confirmação por email pode ficar ligada: o app confirma sozinho as contas dos operadores.
@@ -56,7 +56,7 @@ Para testar no teu computador: copia `.env.example` para `.env`, preenche, e cor
 
 Ao fechar, os contadores das mangueiras e o stock dos tanques são actualizados. O admin **valida** o turno ou **reabre-o** para corrigir. Só pode reabrir o último turno de cada mangueira.
 
-**Crédito**: cada lançamento fica no extrato do cliente. Os pagamentos baixam o saldo. **Emitir fatura** junta os lançamentos ainda não faturados de um período (numeração `FT 2026/0001`…). Extratos e faturas imprimem-se ou guardam-se em PDF com o botão Imprimir.
+**Crédito**: cada lançamento fica no extrato do cliente, com a **foto da requisição** (o operador tira-a com o telemóvel ao registar, ou junta-a depois na lista do turno). Em Lançamentos, "Só sem foto" mostra os que ainda não têm foto. Os pagamentos baixam o saldo. **Emitir fatura** junta os lançamentos ainda não faturados de um período (numeração `FT 2026/0001`…). Extratos e faturas imprimem-se ou guardam-se em PDF com o botão Imprimir.
 
 **Stock**: o nível desce com cada turno fechado e sobe com cada recepção. As **medições** (vareta) mostram a diferença entre o tanque e o sistema e podem corrigir o nível.
 

@@ -3,6 +3,7 @@ import { supabase, q } from '../lib/supabase.js'
 import { useData } from '../lib/hooks.js'
 import { loadShift, getHoses, getProducts, getClients, getSides, getTanks, byId } from '../lib/refs.js'
 import SwitchTankForm from '../components/SwitchTank.jsx'
+import { PhotoInput, PhotoButton, AddPhotoButton, uploadRequisicao } from '../components/Photo.jsx'
 import { mt, lt, n2, hm, dt, dtt, duration, today, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Btn, Field, Input, Select, Icon, Meter, Loading, ErrorNote, Empty, EstadoTag, Modal, useAction, useToast, confirmar } from '../components/ui.jsx'
 import { ShiftTotals, CashList } from '../components/ShiftReport.jsx'
@@ -161,7 +162,8 @@ function CreditTab({ shift, credit, prod, cli, refs, reload }) {
           <table className="t"><tbody>{credit.slice().reverse().map(c => (
             <tr key={c.id}>
               <td><b>{cli[c.client_id]?.nome}</b>
-                <div className="muted" style={{ fontSize: 13 }}>{n2(c.quantidade)} {prod[c.product_id]?.unidade} {prod[c.product_id]?.nome} · {[c.requisicao && 'Req. ' + c.requisicao, c.matricula].filter(Boolean).join(' · ')}</div></td>
+                <div className="muted" style={{ fontSize: 13 }}>{n2(c.quantidade)} {prod[c.product_id]?.unidade} {prod[c.product_id]?.nome} · {[c.requisicao && 'Req. ' + c.requisicao, c.matricula].filter(Boolean).join(' · ')}</div>
+                <div style={{ marginTop: 4 }}>{c.foto_path ? <PhotoButton path={c.foto_path} small={false} /> : <AddPhotoButton saleId={c.id} onDone={reload} />}</div></td>
               <td className="right num"><b>{mt(c.total)}</b></td>
               <td style={{ width: 40 }}><button className="x" aria-label="Apagar" onClick={() => apagar(c)}>✕</button></td>
             </tr>
@@ -180,6 +182,7 @@ function OpCreditForm({ shift, refs, onClose, onSaved }) {
   const [f, setF] = useState({ client_id: '', product_id: fuels[0]?.id || '', modo: 'litros', qtd: '', requisicao: '', matricula: '', motorista: '' })
   const [busca, setBusca] = useState('')
   const [status, setStatus] = useState(null)
+  const [foto, setFoto] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value }))
@@ -203,13 +206,16 @@ function OpCreditForm({ shift, refs, onClose, onSaved }) {
     if (!f.client_id) return setErr('Escolhe o cliente.')
     if (!litros || litros <= 0) return setErr('Indica a quantidade.')
     if (passa && !confirmar('Este cliente vai passar o limite de crédito. Registar mesmo assim?')) return
+    if (!foto && !confirmar('Registar sem foto da requisição? Podes juntar a foto depois, na lista do turno.')) return
     setBusy(true)
     try {
+      const foto_path = foto ? await uploadRequisicao(foto) : null
       await q(supabase.from('credit_sales').insert({
         client_id: Number(f.client_id), shift_id: shift.id, data: today(), product_id: Number(f.product_id), quantidade: litros,
         requisicao: f.requisicao.trim() || null, matricula: f.matricula.trim().toUpperCase() || null, motorista: f.motorista.trim() || null,
+        foto_path,
       }))
-      toast('Lançamento registado')
+      toast(foto_path ? 'Lançamento registado com foto' : 'Lançamento registado')
       onSaved()
     } catch (e2) { setErr(e2.message) } finally { setBusy(false) }
   }
@@ -240,9 +246,10 @@ function OpCreditForm({ shift, refs, onClose, onSaved }) {
           <Field label="Matrícula"><Input value={f.matricula} onChange={set('matricula')} autoCapitalize="characters" /></Field>
         </div>
         <Field label="Motorista"><Input value={f.motorista} onChange={set('motorista')} /></Field>
+        <PhotoInput file={foto} onChange={setFoto} />
         <div className="kv total"><span>{n2(litros)} {p?.unidade} × {n2(preco)}</span><span className="num">{mt(total)}</span></div>
         {err && <div className="note err">{err}</div>}
-        <Btn big disabled={busy} onClick={save}>{busy ? 'A guardar…' : 'Registar lançamento'}</Btn>
+        <Btn big disabled={busy} onClick={save}>{busy ? (foto ? 'A enviar a foto…' : 'A guardar…') : 'Registar lançamento'}</Btn>
       </form>
     </Modal>
   )

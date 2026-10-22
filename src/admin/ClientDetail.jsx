@@ -6,6 +6,7 @@ import { mt, n2, dt, monthStart, today, downloadCSV, METODOS_PAG } from '../lib/
 import { Loading, ErrorNote, Btn, Field, Input, Tag, Empty, useAction, confirmar, printDoc } from '../components/ui.jsx'
 import { StatementDoc, InvoiceDoc } from '../components/Docs.jsx'
 import { ClientForm, CreditSaleForm, PaymentForm, InvoiceForm } from './forms.jsx'
+import { PhotoButton } from '../components/Photo.jsx'
 
 export default function ClientDetail({ id, go }) {
   const act = useAction()
@@ -115,7 +116,7 @@ export default function ClientDetail({ id, go }) {
                       <td>{l.tipo === 'venda'
                         ? <>{n2(l.quantidade)} {prod[l.product_id]?.unidade} {prod[l.product_id]?.nome} × {n2(l.preco_unit)}{l.invoice_id && <Tag kind="fechado">{invoices.find(i => i.id === l.invoice_id)?.numero || 'Faturado'}</Tag>}</>
                         : <span className="pos">Pagamento {METODOS_PAG[l.metodo]} {l.referencia || ''}</span>}</td>
-                      <td>{l.requisicao || ''}</td>
+                      <td>{l.requisicao || ''} {l.foto_path && <PhotoButton path={l.foto_path} />}</td>
                       <td>{l.matricula || ''}</td>
                       <td className="right num">{l.debito ? mt(l.debito) : ''}</td>
                       <td className="right num pos">{l.credito ? mt(l.credito) : ''}</td>

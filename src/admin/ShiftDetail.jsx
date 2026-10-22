@@ -4,6 +4,7 @@ import { loadShift, getHoses, getProducts, getClients, getProfiles, getSides, ge
 import { mt, lt, n2, dtt, hm, duration, parseNum, METODOS_CAIXA } from '../lib/format.js'
 import { Loading, ErrorNote, Btn, EstadoTag, useAction, confirmar, printDoc } from '../components/ui.jsx'
 import { ShiftReadings, ShiftTotals, CashList } from '../components/ShiftReport.jsx'
+import { PhotoButton, AddPhotoButton } from '../components/Photo.jsx'
 
 export default function ShiftDetail({ id, go }) {
   const act = useAction()
@@ -100,7 +101,8 @@ export default function ShiftDetail({ id, go }) {
               {credit.map(c => (
                 <tr key={c.id}>
                   <td><b className="click" onClick={() => go('clientes/' + c.client_id)} style={{ cursor: 'pointer' }}>{clients[c.client_id]?.nome}</b>
-                    <div className="muted" style={{ fontSize: 13 }}>{[c.requisicao && 'Req. ' + c.requisicao, c.matricula, c.motorista].filter(Boolean).join(' · ')}</div></td>
+                    <div className="muted" style={{ fontSize: 13 }}>{[c.requisicao && 'Req. ' + c.requisicao, c.matricula, c.motorista].filter(Boolean).join(' · ')}</div>
+                    <div style={{ marginTop: 4 }}>{c.foto_path ? <PhotoButton path={c.foto_path} small={false} /> : <span className="nophoto">sem foto</span>}</div></td>
                   <td className="num">{n2(c.quantidade)} {products[c.product_id]?.unidade} {products[c.product_id]?.nome}</td>
                   <td className="right num"><b>{mt(c.total)}</b></td>
                   <td style={{ width: 40 }}>{!c.invoice_id && <button className="x" aria-label="Apagar" onClick={() => apagar('credit_sales', c, 'este lançamento')}>✕</button>}</td>

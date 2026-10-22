@@ -5,10 +5,11 @@ import { getProducts, getClients, getProfiles, byId } from '../lib/refs.js'
 import { mt, n2, dt, monthStart, today, downloadCSV } from '../lib/format.js'
 import { PageHead, Loading, ErrorNote, Empty, Btn, Field, Input, Select, Tag, useAction, confirmar } from '../components/ui.jsx'
 import { CreditSaleForm } from './forms.jsx'
+import { PhotoButton, AddPhotoButton } from '../components/Photo.jsx'
 
 export default function CreditSales({ go }) {
   const act = useAction()
-  const [f, setF] = useState({ de: monthStart(), ate: today(), cliente: '', produto: '', busca: '' })
+  const [f, setF] = useState({ de: monthStart(), ate: today(), cliente: '', produto: '', busca: '', semFoto: false })
   const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value }))
   const [modal, setModal] = useState(null)
 
@@ -22,7 +23,7 @@ export default function CreditSales({ go }) {
 
   const prod = byId(data?.products), cli = byId(data?.clients), prof = byId(data?.profiles)
   const term = f.busca.trim().toLowerCase()
-  const sales = (data?.sales || []).filter(s => !term || `${s.requisicao || ''} ${s.matricula || ''} ${s.motorista || ''}`.toLowerCase().includes(term))
+  const sales = (data?.sales || []).filter(s => (!term || `${s.requisicao || ''} ${s.matricula || ''} ${s.motorista || ''}`.toLowerCase().includes(term)) && (!f.semFoto || !s.foto_path))
   const total = sales.reduce((a, s) => a + Number(s.total), 0)
   const porProduto = {}
   for (const s of sales) porProduto[s.product_id] = (porProduto[s.product_id] || 0) + Number(s.quantidade)
@@ -31,8 +32,8 @@ export default function CreditSales({ go }) {
     act(() => q(supabase.from('credit_sales').delete().eq('id', s.id)), 'Lançamento apagado').then(ok => ok && reload())
 
   const exportar = () => downloadCSV(`lancamentos_${f.de}_${f.ate}.csv`, [
-    ['Data', 'Cliente', 'Requisição', 'Matrícula', 'Motorista', 'Produto', 'Quantidade', 'Preço', 'Total', 'Turno', 'Registado por', 'Faturado'],
-    ...sales.map(s => [s.data, cli[s.client_id]?.nome, s.requisicao, s.matricula, s.motorista, prod[s.product_id]?.nome, s.quantidade, s.preco_unit, s.total, s.shift_id || '', prof[s.created_by]?.nome || '', s.invoice_id ? 'sim' : 'não']),
+    ['Data', 'Cliente', 'Requisição', 'Matrícula', 'Motorista', 'Produto', 'Quantidade', 'Preço', 'Total', 'Turno', 'Registado por', 'Faturado', 'Foto'],
+    ...sales.map(s => [s.data, cli[s.client_id]?.nome, s.requisicao, s.matricula, s.motorista, prod[s.product_id]?.nome, s.quantidade, s.preco_unit, s.total, s.shift_id || '', prof[s.created_by]?.nome || '', s.invoice_id ? 'sim' : 'não', s.foto_path ? 'sim' : 'não']),
   ])
 
   return (
@@ -48,6 +49,7 @@ export default function CreditSales({ go }) {
         <Field label="Cliente"><Select value={f.cliente} onChange={set('cliente')}><option value="">Todos</option>{(data?.clients || []).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</Select></Field>
         <Field label="Produto"><Select value={f.produto} onChange={set('produto')}><option value="">Todos</option>{(data?.products || []).map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</Select></Field>
         <Field label="Requisição / matrícula"><Input value={f.busca} onChange={set('busca')} placeholder="Procurar" /></Field>
+        <label className="check" style={{ minHeight: 42 }}><input type="checkbox" checked={f.semFoto} onChange={e => setF(x => ({ ...x, semFoto: e.target.checked }))} />Só sem foto</label>
       </div>
 
       {Object.keys(porProduto).length > 0 && (
@@ -61,11 +63,12 @@ export default function CreditSales({ go }) {
         {loading && !data ? <Loading /> : sales.length === 0 ? <Empty title="Sem lançamentos neste período" /> : (
           <div className="table-wrap">
             <table className="t">
-              <thead><tr><th>Data</th><th>Cliente</th><th>Req.</th><th>Matrícula</th><th>Produto</th><th className="right">Qtd</th><th className="right">Preço</th><th className="right">Total</th><th>Origem</th><th /></tr></thead>
+              <thead><tr><th>Data</th><th>Cliente</th><th>Foto</th><th>Req.</th><th>Matrícula</th><th>Produto</th><th className="right">Qtd</th><th className="right">Preço</th><th className="right">Total</th><th>Origem</th><th /></tr></thead>
               <tbody>{sales.map(s => (
                 <tr key={s.id}>
                   <td className="num">{dt(s.data)}</td>
                   <td><a href={`#/clientes/${s.client_id}`}>{cli[s.client_id]?.nome}</a></td>
+                  <td>{s.foto_path ? <PhotoButton path={s.foto_path} /> : <AddPhotoButton saleId={s.id} onDone={reload} label="" />}</td>
                   <td>{s.requisicao || '—'}</td>
                   <td>{s.matricula || '—'}</td>
                   <td>{prod[s.product_id]?.nome}</td>
@@ -79,7 +82,7 @@ export default function CreditSales({ go }) {
                   </td>
                 </tr>
               ))}</tbody>
-              <tfoot><tr><td colSpan={7}>Total</td><td className="right num">{mt(total)}</td><td colSpan={2} /></tr></tfoot>
+              <tfoot><tr><td colSpan={8}>Total</td><td className="right num">{mt(total)}</td><td colSpan={2} /></tr></tfoot>
             </table>
           </div>
         )}

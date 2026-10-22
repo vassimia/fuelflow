@@ -228,3 +228,13 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
   body.printing #root { display: none; }
   body.printing .print-only { display: block; }
 }
+
+/* ---------- Fotos de requisição ---------- */
+.photo-drop { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; border: 2px dashed var(--line); border-radius: var(--radius); background: var(--surface); color: var(--blue); font-weight: 600; cursor: pointer; width: 100%; }
+.photo-drop:hover { border-color: var(--blue); background: var(--blue-soft); }
+.photo-box { display: flex; flex-direction: column; gap: 8px; }
+.photo-box img { width: 100%; max-height: 260px; object-fit: contain; background: var(--line-2); border-radius: var(--radius-sm); }
+.photo-btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--blue); border-radius: 6px; padding: 3px 6px; cursor: pointer; font-weight: 600; font-size: 13px; vertical-align: middle; }
+.photo-btn:hover { background: var(--blue-soft); }
+.photo-btn.big { padding: 6px 10px; font-size: 14px; }
+.nophoto { color: var(--muted); font-size: 12px; }

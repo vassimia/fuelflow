@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase, q } from '../lib/supabase.js'
 import { today, monthStart, monthEnd, parseNum, mt, METODOS_PAG } from '../lib/format.js'
 import { FormModal, Field, Input, Select, Textarea } from '../components/ui.jsx'
+import { PhotoInput, PhotoButton, uploadRequisicao } from '../components/Photo.jsx'
 
 const useForm = (init) => {
   const [f, setF] = useState(init)
@@ -50,6 +51,7 @@ export function CreditSaleForm({ sale, clients, products, clientId, onClose, onS
     quantidade: sale?.quantidade ?? '', preco_unit: sale?.preco_unit ?? '', requisicao: sale?.requisicao || '',
     matricula: sale?.matricula || '', motorista: sale?.motorista || '', notas: sale?.notas || '',
   })
+  const [foto, setFoto] = useState(null)
   useEffect(() => {
     if (!sale && f.product_id) {
       const p = products.find(x => x.id === Number(f.product_id))
@@ -66,6 +68,7 @@ export function CreditSaleForm({ sale, clients, products, clientId, onClose, onS
       requisicao: f.requisicao.trim() || null, matricula: f.matricula.trim().toUpperCase() || null,
       motorista: f.motorista.trim() || null, notas: f.notas.trim() || null,
     }
+    if (foto) row.foto_path = await uploadRequisicao(foto)
     if (sale) await q(supabase.from('credit_sales').update(row).eq('id', sale.id))
     else await q(supabase.from('credit_sales').insert(row))
     onSaved?.()
@@ -98,6 +101,8 @@ export function CreditSaleForm({ sale, clients, products, clientId, onClose, onS
         <Field label="Motorista"><Input value={f.motorista} onChange={set('motorista')} /></Field>
       </div>
       <Field label="Notas"><Input value={f.notas} onChange={set('notas')} /></Field>
+      {sale?.foto_path && !foto && <div className="row"><span className="muted">Foto guardada:</span><PhotoButton path={sale.foto_path} small={false} /></div>}
+      <PhotoInput file={foto} onChange={setFoto} label={sale?.foto_path ? 'Substituir foto da requisição' : 'Foto da requisição'} />
       <div className="kv total"><span>Total</span><span className="num">{mt(total)}</span></div>
       {sale?.invoice_id && <div className="note warn">Este lançamento já está numa fatura. Se mudares o valor, anula e volta a emitir a fatura.</div>}
     </FormModal>
